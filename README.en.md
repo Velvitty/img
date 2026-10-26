@@ -246,7 +246,6 @@ PSNR (peak signal-to-noise ratio) expresses in dB how close the result is to the
 | The copy button does nothing | The text is already selected; press Ctrl/⌘+C. |
 | The photo looks nothing like the original | The code may come from a different version of the page. Open it on the same version it was made with. |
 | The total is a little under the limit | This is normal. Compression steps come in jumps, so a few characters can be left over. |
-| The page returns 404 | Check the repository's Pages settings, the `CNAME` file in the root and the DNS CNAME (`g` → `velvitty.github.io`). The first setup takes a few minutes to propagate. |
 
 ### FAQ
 
@@ -276,24 +275,24 @@ These notes are the same as those attached to each part of the detailed document
 #### Design notes: problem statement
 
 - **What:** A lossy image format that fits in one comment line (400 characters), and a browser page that creates and decodes it.
-- **Why:** DCInside comments are limited to 400 characters, cannot carry attachments, and do not show `data:` links as images (confirmed by the user and measured in an earlier session). To send a photo, the photo itself has to be written out as text.
+- **Why:** DCInside comments are limited to 400 characters, cannot carry attachments, and do not show `data:` links as images. To send a photo, the photo itself has to be written out as text.
 - **How (method and technique):** The classic lossy pipeline of transform coding (DCT) → quantization → context-adaptive binary arithmetic coding → text packing, redesigned for an extremely small budget of a few hundred bytes.
 - **Mathematical approach:** One character carries `log2(alphabet size)` bits: `log2 64 = 6` for base64url and `log2 8192 = 13` for the 8,192 Hangul syllables used. After the 19-character address, 381 characters × 13 bits = 4,953 bits ≈ 619 bytes is all the photo gets. By Shannon's source coding theorem [7] the average code length cannot go below the model's entropy, so the design needs both a model that describes photos with low entropy (transform plus context model) and a coder that gets close to that entropy (arithmetic coding).
 - **Engineering approach:** It must run from one static file with no server, and the code must be the entire data (self-contained). So there is no storage, no upload and no account.
-- **Why this choice (alternatives):** (1) Links to an image host are short but depend on an upload and a server's lifetime, which conflicts with the no-upload requirement. (2) A JPEG `data:` link spends about 600 bytes on quantization and Huffman tables alone, over 800 characters in base64 [3][4][26]. (3) BlurHash [35] and ThumbHash [36] target placeholders of a few dozen characters with a fixed number of components (BlurHash allows at most 9 per axis), so they cannot use a 400-character budget. A dedicated codec whose quality grows with the budget was built instead.
+- **Why this choice (alternatives):** (1) Links to an image host are short but depend on an upload and a server's lifetime, which conflicts with the no-upload requirement. (2) A JPEG `data:` link spends about 600 bytes on quantization and Huffman tables alone, over 800 characters in base64 [3][4][26]. (3) BlurHash [33] and ThumbHash [34] target placeholders of a few dozen characters with a fixed number of components (BlurHash allows at most 9 per axis), so they cannot use a 400-character budget. A dedicated codec whose quality grows with the budget was built instead.
 - **Value:** No server cost or privacy risk, and as long as the text is copied, it decodes to the same photo anywhere, indefinitely.
 - **Limitations:** The information ceiling is hard, so results cannot go beyond a blurry preview. Whether DCInside autolinks a link containing Hangul all the way through has not been verified.
-- **Sources:** [3], [4], [7], [26], [35], [36]
+- **Sources:** [3], [4], [7], [26], [33], [34]
 
 #### Design notes: addresses and transport
 
 - **What:** Links of the form `https://g.yeon.at/?code`, and the rule that switches to `#` for long codes.
-- **Why:** DCInside comments only become clickable links when they start with `https://` (confirmed by the user). With the code after `?`, GitHub Pages ignores that part and serves the same `index.html`, so every address can open a different photo without any server setup.
+- **Why:** DCInside comments only become clickable links when they start with `https://`. With the code after `?`, GitHub Pages ignores that part and serves the same `index.html`, so every address can open a different photo without any server setup.
 - **How (method and technique):** On load the page reads `location.search`, or `location.hash` if there is no query, to get the code. On copy, if the URL-encoded address exceeds 7,000 bytes, `?` is replaced with `#`.
 - **Mathematical approach:** A Hangul syllable is 3 bytes in UTF-8, and each byte becomes the 3 characters `%XX` in an address, so one syllable costs 9 bytes. A 381-character code is 381 × 9 = 3,429 bytes plus the 19-byte address. The 7,000-byte threshold corresponds to `(7000 − 19) / 9 ≈ 775` syllables.
 - **Engineering approach:** In URI syntax [27] the query (after `?`) is sent to the server, while the fragment (after `#`) stays in the browser. HTTP allows a server to answer 414 to an overly long target [28]. Requests to g.yeon.at returned 200 at 6,000 bytes and 414 at 9,000 bytes (measured 2026-10-26), so the cut-off was set at 7,000 bytes to leave room for the rest of the request line.
-- **Why this choice (alternatives):** Always using `#` would avoid 414 entirely, but the user wanted the `?` form, and short links have no problem with it. So short codes use `?` and long ones `#`.
-- **Value:** 400-character links look exactly as the user wanted, and links of thousands of characters open without errors. The part after `#` never appears in server logs either.
+- **Why this choice (alternatives):** Always using `#` would avoid 414 entirely, but `?` is the default form and works fine for short links. So short codes use `?` and long ones `#`.
+- **Value:** 400-character links keep the `?` form, and links of thousands of characters open without errors. The part after `#` never appears in server logs either.
 - **Limitations:** The 414 boundary is a measurement of GitHub Pages (and its CDN) today and may change. How far a messenger's or forum's autolinker extends over non-ASCII characters differs by service.
 - **Sources:** [27], [28], [32]
 
@@ -301,24 +300,24 @@ These notes are the same as those attached to each part of the detailed document
 
 - **What:** Deploying only `index.html` and `CNAME` to GitHub Pages under the custom domain `g.yeon.at`.
 - **Why:** Both compression and decoding happen in the browser, so the server only has to deliver a file.
-- **How (method and technique):** `build.py` in img-dev produces `dist/`, which is copied into the img repository and pushed to `main`. DNS has a `g` CNAME → `velvitty.github.io`, and GitHub issues the certificate through Let's Encrypt [32][33].
-- **Engineering approach:** Development material (img-dev) and the deployed copy (img) live in separate repositories so the deploy repository holds only what users should see. Because the account keeps its email private, commits must use the GitHub noreply address for pushes to be accepted [34].
+- **How (method and technique):** `build.py` in img-dev produces `dist/`, which is copied into the img repository and pushed to `main`.
+- **Engineering approach:** Development material (img-dev) and the deployed copy (img) live in separate repositories so the deploy repository holds only the files the page needs. The `CNAME` file sets the custom domain [32].
 - **Why this choice (alternatives):** A serverless function or own server could enforce the address restriction or collect usage statistics server-side, but would add cost and data-handling burden. Static hosting fits the requirements most simply.
 - **Value:** No running cost, and GitHub Pages is the only point of failure.
-- **Limitations:** Certificate issuance follows GitHub's schedule, so Enforce HTTPS cannot always be turned on right away. With no server code, checks such as the address restriction can only run in the browser.
-- **Sources:** [32], [33], [34]
+- **Limitations:** With no server code, checks such as the address restriction can only run in the browser.
+- **Sources:** [32]
 
 #### Design notes: preprocessing
 
 - **What:** Shrinking the photo to the grid, compositing it on white, and converting it to YCbCr.
 - **Why:** To size the transform to the budget, keeping computation low, and to separate brightness from color so color can be treated more coarsely.
 - **How (method and technique):** On a canvas the photo is halved until it is 2–4 times the target, then drawn once more at grid size. The aspect ratio is stored in 6 bits as `a = round(16 · log2(width/height))`. Color conversion uses JFIF's full-range BT.601 coefficients (`Y = 0.299R + 0.587G + 0.114B`, and so on) [5][6].
-- **Mathematical approach:** By the sampling theorem [38], shrinking by a factor k folds frequencies above `1/(2k)` of the original resolution back into the image (aliasing). The browser's bilinear filter looks at only a 2×2 neighborhood, so one large reduction is effectively point sampling. Halving step by step makes each step close to a 2×2 average, giving the same low-pass effect as a mipmap pyramid [18]. The aspect code has 16 steps per octave, so the ratio error is at most `2^(1/32) ≈ 2.2%`, and ±31 steps reach `2^(31/16) ≈ 3.83:1`.
+- **Mathematical approach:** By the sampling theorem [36], shrinking by a factor k folds frequencies above `1/(2k)` of the original resolution back into the image (aliasing). The browser's bilinear filter looks at only a 2×2 neighborhood, so one large reduction is effectively point sampling. Halving step by step makes each step close to a 2×2 average, giving the same low-pass effect as a mipmap pyramid [18]. The aspect code has 16 steps per octave, so the ratio error is at most `2^(1/32) ≈ 2.2%`, and ±31 steps reach `2^(31/16) ≈ 3.83:1`.
 - **Engineering approach:** A 64-pixel grid has 64 × 48 = 3,072 coefficients per channel: enough for the few hundred non-zero ones a 400-character budget (about 619 bytes) can hold, while the transform takes under a millisecond. The eye is less sensitive to color contrast than to brightness contrast [17], so separating the color channels lets quantization treat them differently.
 - **Why this choice (alternatives):** Compressing RGB directly spends bits on information repeated in all three channels. Instead of 4:2:0-style spatial chroma subsampling, the color channels use a 1.7× larger step on the same grid. With a whole-image DCT, high-frequency color coefficients end up at zero anyway, so the effect is similar and the code is simpler.
 - **Value:** Photos of any size go through the same path, and no staircase artifacts from downscaling leak into the result.
 - **Limitations:** Canvas downscaling differs slightly between browsers, so the same photo can produce slightly different codes in different browsers. Photos longer than 3.8:1 are squeezed. Transparency is lost to white.
-- **Sources:** [5], [6], [17], [18], [30], [38]
+- **Sources:** [5], [6], [17], [18], [30], [36]
 
 #### Design notes: transform
 
@@ -386,15 +385,15 @@ These notes are the same as those attached to each part of the detailed document
 - **How (method and technique):** The bit string is cut into 13-bit groups written as `U+AC00 + value`, or 6-bit groups written in the base64url alphabet [25]. When reading, characters outside the ranges are ignored.
 - **Mathematical approach:** Unicode has 11,172 Hangul syllables at `U+AC00–U+D7A3` [29]. Using all of them would give `log2 11172 ≈ 13.447` bits, 3.4% more than 13, but would require treating the whole code as one big number and converting its base, an `O(n²)` computation. Using a power of two, 8,192 characters, lets bits be cut and joined directly.
 - **Engineering approach:** Spare bits in the last character are zero-filled, which matches the decoder's rule of reading missing bytes as zero and makes the trailing-character trim possible.
-- **Why this choice (alternatives):** base83 (BlurHash [35]) or base85 carry slightly more than 6 bits but include address-special characters such as `#`, `%` and `?`. Emoji or Han characters could carry more bits, but display and input are unreliable. Hangul is natural for DCInside users and present in most fonts.
+- **Why this choice (alternatives):** base83 (BlurHash [33]) or base85 carry slightly more than 6 bits but include address-special characters such as `#`, `%` and `?`. Emoji or Han characters could carry more bits, but display and input are unreliable. Hangul is natural on DCInside and present in most fonts.
 - **Value:** The same 400 characters hold about 2.2 times as much information as ASCII.
 - **Limitations:** Where length is counted in UTF-8 bytes, Hangul carries 4.33 bits per byte, worse than ASCII's 6. A normalization that decomposes syllables into jamo (NFD) [29] breaks the code; the decoder does not currently convert pasted text back to NFC.
-- **Sources:** [25], [29], [35]
+- **Sources:** [25], [29], [33]
 
 #### Design notes: rate control and grid selection
 
 - **What:** How the finest q and the most suitable grid size within the character limit are chosen.
-- **Why:** Users only set a character count and expect the best quality within it.
+- **Why:** Only a character count is given, and quality should be as high as possible within it.
 - **How (method and technique):** q is binary-searched from 0 to 127 (7–8 encodes). Trailing characters are removed one at a time while the code still decodes identically. If the 64-pixel grid cannot fill the budget even at q = 0, the photo is re-encoded on the next grid, and the two results are compared by mean squared error against the original at the larger grid size; the better one is kept.
 - **Mathematical approach:** The code length R(q) decreases almost monotonically with q, so binary search finds the smallest q with `R(q) ≤ budget` in about `⌈log2 128⌉ = 7` steps. Whether to spend a given rate on higher resolution with coarser quantization or lower resolution with finer quantization is a classic rate-distortion optimization problem [20]. Here it is solved with a greedy rule, trying a larger grid only once the smaller one is saturated, plus an actual error comparison.
 - **Engineering approach:** A grid that fits at q = 0 skips the binary search, which cut a 7,000-character encode from about 1.8 s to 1.4 s. The trailing-character trim removes the spare bytes the range coder emits at the end, and since it checks by actually decoding, it cannot go wrong.
@@ -418,7 +417,7 @@ These notes are the same as those attached to each part of the detailed document
 #### Design notes: page design
 
 - **What:** The screens, code detection, address restriction and remembered settings inside one HTML file.
-- **Why:** The user prefers one HTML file with inline JS and CSS that runs only in the browser, and recipients must be able to open it with no preparation.
+- **Why:** The design principle is one HTML file with inline JS and CSS that runs only in the browser, and recipients must be able to open it with no preparation.
 - **How (method and technique):** The codec source is inserted into the page at build time. In pasted text, the longest run of Hangul (at least 4 characters) is taken as the code; failing that, the longest base64url run after the last `?` or `#`. Outside g.yeon.at, localhost, local files and the claude.ai preview, the page draws only a notice and stops.
 - **Engineering approach:** Every localStorage access is wrapped so the page still works with defaults when storage is blocked. If the Clipboard API is refused, copying falls back to selecting the text. Canvas and image handling follow the HTML standard (an animated image draws its default frame) [30].
 - **Why this choice (alternatives):** A framework would shorten the UI code but enlarge the file and add external dependencies. An address restriction is only reliable on a server, but static hosting has no server code.
@@ -440,13 +439,13 @@ These notes are the same as those attached to each part of the detailed document
 
 - **What:** How image quality is compared numerically (PSNR), plus the test photos and browser tests.
 - **Why:** Choosing parameters, and checking that a change did not break earlier results, requires reproducible numbers.
-- **How (method and technique):** The original box-downscaled to 160×120 is compared with the decoded result drawn at 160×120. Large-grid tests compare at 512×512. Test photos are 8 training and 6 validation images from picsum.photos (Unsplash photos) [37].
+- **How (method and technique):** The original box-downscaled to 160×120 is compared with the decoded result drawn at 160×120. Large-grid tests compare at 512×512. Test photos are 8 training and 6 validation images from picsum.photos (Unsplash photos) [35].
 - **Mathematical approach:** The original's high frequencies cannot be transmitted anyway, so comparing near the size the recipient sees is what reveals differences between codecs. PSNR is a logarithm of mean squared error, simple to compute and easy to reproduce.
 - **Engineering approach:** After every codec change, the 400-character results (average PSNR and the code strings) are checked against earlier ones to keep backward compatibility. Browser tests open the real page with Playwright to check making codes, opening links, pasting and the address restriction.
 - **Why this choice (alternatives):** Perceptual metrics such as SSIM track human judgment better [21], but the work started with PSNR because it is simple and easy to interpret.
 - **Value:** Whether a change improved quality or broke existing codes can be checked in seconds.
-- **Limitations:** Fourteen photos is a small sample, and PSNR can disagree with perceived quality [21][22]. The test picture supplied by the user is not included in the repository.
-- **Sources:** [21], [22], [37]
+- **Limitations:** Fourteen photos is a small sample, and PSNR can disagree with perceived quality [21][22]. The 1200×1200 picture used for the large-limit tests is not included in the repository.
+- **Sources:** [21], [22], [35]
 
 #### Design notes: the mathematics of PSNR
 
@@ -461,7 +460,7 @@ These notes are the same as those attached to each part of the detailed document
 
 ### References
 
-Sources for the concepts, standards and related work used in the design. The works below are cited from established knowledge; their original texts were not re-opened and checked during this work. Measurements come from the `lab/` scripts in [img-dev](https://github.com/Velvitty/img-dev) and the "Measurements and provided information" list below.
+Sources for the concepts, standards and related work used in the design. Measurements come from the `lab/` scripts in [img-dev](https://github.com/Velvitty/img-dev) and the "Measurements" list below.
 
 #### Papers and books
 
@@ -503,22 +502,19 @@ Sources for the concepts, standards and related work used in the design. The wor
 #### Technical documentation
 
 32. GitHub Docs, "Managing a custom domain for your GitHub Pages site." https://docs.github.com/en/pages/configuring-a-custom-domain-for-your-github-pages-site/managing-a-custom-domain-for-your-github-pages-site
-33. GitHub Docs, "Securing your GitHub Pages site with HTTPS." https://docs.github.com/en/pages/getting-started-with-github-pages/securing-your-github-pages-site-with-https
-34. GitHub Docs, "Setting your commit email address." https://docs.github.com/en/account-and-profile/setting-up-and-managing-your-personal-account-on-github/managing-email-preferences/setting-your-commit-email-address
 
 #### Related work
 
-35. Wolt, *BlurHash*. https://github.com/woltapp/blurhash
-36. E. Wallace, *ThumbHash*, 2023. https://github.com/evanw/thumbhash
+33. Wolt, *BlurHash*. https://github.com/woltapp/blurhash
+34. E. Wallace, *ThumbHash*, 2023. https://github.com/evanw/thumbhash
 
 #### Data sources
 
-37. Picsum Photos (photos provided by Unsplash). https://picsum.photos/ — img-dev `lab/imgs/` (ids 1015, 1025, 1062, 1084, 177, 237, 433, 64), img-dev `lab/val/` (ids 1003, 1035, 1074, 200, 287, 334)
-38. C. E. Shannon, "Communication in the presence of noise," *Proceedings of the IRE*, vol. 37, no. 1, pp. 10–21, 1949. doi:10.1109/JRPROC.1949.232969 (sampling theorem)
+35. Picsum Photos (photos provided by Unsplash). https://picsum.photos/ — img-dev `lab/imgs/` (ids 1015, 1025, 1062, 1084, 177, 237, 433, 64), img-dev `lab/val/` (ids 1003, 1035, 1074, 200, 287, 334)
+36. C. E. Shannon, "Communication in the presence of noise," *Proceedings of the IRE*, vol. 37, no. 1, pp. 10–21, 1949. doi:10.1109/JRPROC.1949.232969 (sampling theorem)
 
-#### Measurements and provided information
+#### Measurements
 
-- DCInside comment limit of 400 characters, no display of images or `data:` links, and autolinking only with `https://`: confirmed by the user and measured in an earlier session.
+- DCInside comment limit of 400 characters, no display of images or `data:` links, and autolinking only with `https://`: checked in an actual comment box.
 - GitHub Pages (g.yeon.at) 414 boundary: on 2026-10-26, requests with queries of 1,000–60,000 bytes returned 200 at 6,000 bytes and 414 at 9,000 bytes.
-- g.yeon.at DNS (CNAME → velvitty.github.io, CAA allowing letsencrypt.org): looked up through dns.google on 2026-10-26.
-- Quality and speed figures: measured with the `lab/` scripts in [img-dev](https://github.com/Velvitty/img-dev) (Node.js 22). The 1200×1200 picture used for the large-limit tests was supplied by the user and is not in the repository.
+- Quality and speed figures: measured with the `lab/` scripts in [img-dev](https://github.com/Velvitty/img-dev) (Node.js 22). The 1200×1200 picture used for the large-limit tests is not in the repository.
