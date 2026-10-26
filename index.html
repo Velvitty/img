@@ -1,0 +1,956 @@
+<!doctype html>
+<html lang="ko">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover">
+<title>400자 짤 압축기</title>
+<meta name="claude:viewport-fit-sides" content="cover">
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=IBM+Plex+Sans+KR:wght@400;500;700&family=JetBrains+Mono:wght@400;600&display=swap">
+<style>
+body{margin:0}
+/* Layout: one working column — tabs, settings, drop zone, then result cards (original beside the decoded preview) */
+:root {
+  --bg: #f3f4f6;
+  --surface: #ffffff;
+  --fg: #1b1f27;
+  --muted: #5f6675;
+  --line: #d9dce3;
+  --accent: #c2410c;
+  --accent-fg: #ffffff;
+  --good: #15803d;
+  --warn: #b45309;
+  --field: #f8f9fb;
+  --font-body: "IBM Plex Sans KR", "Apple SD Gothic Neo", "Malgun Gothic", system-ui, sans-serif;
+  --font-mono: "JetBrains Mono", ui-monospace, "SF Mono", Menlo, monospace;
+}
+@media (prefers-color-scheme: dark) {
+  :root:not([data-theme="light"]) {
+    --bg: #14161b; --surface: #1d2027; --fg: #e8eaef; --muted: #9aa1b0; --line: #30343e;
+    --accent: #fb8a4c; --accent-fg: #1a0d05; --good: #4ade80; --warn: #fbbf24; --field: #171a20; color-scheme: dark;
+  }
+}
+:root[data-theme="dark"] {
+  --bg: #14161b; --surface: #1d2027; --fg: #e8eaef; --muted: #9aa1b0; --line: #30343e;
+  --accent: #fb8a4c; --accent-fg: #1a0d05; --good: #4ade80; --warn: #fbbf24; --field: #171a20; color-scheme: dark;
+}
+
+* { box-sizing: border-box; }
+[hidden] { display: none !important; }
+body {
+  background: var(--bg); color: var(--fg);
+  font-family: var(--font-body); font-size: 15px; line-height: 1.55;
+  padding-left: max(16px, env(safe-area-inset-left, 0px));
+  padding-right: max(16px, env(safe-area-inset-right, 0px));
+  padding-block: 32px 64px;
+}
+.wrap { max-width: 860px; margin: 0 auto; display: flex; flex-direction: column; gap: 20px; }
+header h1 { font-size: 1.75rem; margin: 0; letter-spacing: -0.01em; text-wrap: balance; }
+header p { margin: 4px 0 0; color: var(--muted); max-width: 64ch; }
+code { font-family: var(--font-mono); font-size: 0.9em; }
+
+.tabs { display: flex; gap: 4px; border-bottom: 1px solid var(--line); flex-wrap: wrap; }
+.tabs button {
+  font: inherit; font-weight: 500; border: 0; background: none; color: var(--muted);
+  padding: 8px 14px; cursor: pointer; border-bottom: 2px solid transparent; margin-bottom: -1px;
+}
+.tabs button[aria-selected="true"] { color: var(--fg); border-bottom-color: var(--accent); font-weight: 700; }
+.tabs button:focus-visible { outline: 2px solid var(--accent); outline-offset: -2px; }
+.panel { display: flex; flex-direction: column; gap: 20px; }
+
+.settings {
+  background: var(--surface); border: 1px solid var(--line); border-radius: 10px;
+  padding: 16px; display: grid; grid-template-columns: repeat(auto-fit, minmax(220px, 1fr)); gap: 16px 24px;
+}
+.field { display: flex; flex-direction: column; gap: 6px; min-width: 0; }
+.label { font-size: 0.75rem; font-weight: 700; letter-spacing: 0.06em; text-transform: uppercase; color: var(--muted); }
+.row { display: flex; align-items: center; gap: 10px; }
+input[type="range"] { flex: 1; accent-color: var(--accent); min-width: 0; }
+.num { font-family: var(--font-mono); font-variant-numeric: tabular-nums; min-width: 3.2em; text-align: right; }
+select, input[type="number"], input[type="url"], input[type="text"] {
+  font: inherit; color: var(--fg); background: var(--field);
+  border: 1px solid var(--line); border-radius: 6px; padding: 6px 8px; width: 100%; min-width: 0;
+}
+input[type="url"] { font-family: var(--font-mono); font-size: 0.8125rem; }
+.seg { display: inline-flex; flex-wrap: wrap; border: 1px solid var(--line); border-radius: 6px; overflow: hidden; align-self: flex-start; }
+.seg button {
+  font: inherit; font-size: 0.875rem; border: 0; background: var(--field); color: var(--muted);
+  padding: 6px 12px; cursor: pointer;
+}
+.seg button[aria-pressed="true"] { background: var(--accent); color: var(--accent-fg); font-weight: 700; }
+.hint { font-size: 0.8125rem; color: var(--muted); }
+.hint.warn { color: var(--warn); }
+.chips { display: flex; flex-wrap: wrap; gap: 6px; }
+.chip {
+  font: inherit; font-size: 0.8125rem; border: 1px solid var(--line); border-radius: 999px;
+  background: var(--field); color: var(--muted); padding: 2px 10px; cursor: pointer;
+}
+.chip[aria-pressed="true"] { border-color: var(--accent); color: var(--accent); font-weight: 700; }
+
+.drop {
+  border: 2px dashed var(--line); border-radius: 10px; padding: 28px 16px; text-align: center;
+  background: var(--surface); cursor: pointer; transition: border-color .15s;
+}
+.drop:hover, .drop:focus-visible, .drop.over { border-color: var(--accent); outline: none; }
+.drop strong { display: block; font-size: 1.05rem; }
+.drop span { color: var(--muted); font-size: 0.875rem; }
+
+.list-head { display: flex; justify-content: space-between; align-items: baseline; gap: 12px; flex-wrap: wrap; }
+.list-head h2 { font-size: 1rem; margin: 0; }
+.list { display: flex; flex-direction: column; gap: 12px; }
+
+.card {
+  background: var(--surface); border: 1px solid var(--line); border-radius: 10px;
+  padding: 14px; display: flex; flex-direction: column; gap: 10px; min-width: 0;
+}
+.pair { display: grid; grid-template-columns: 1fr 1fr; gap: 10px; }
+.pair figure { margin: 0; display: flex; flex-direction: column; gap: 4px; min-width: 0; }
+.pair figcaption { font-size: 0.75rem; color: var(--muted); }
+.pair img, .pair canvas, .viewer canvas {
+  width: 100%; height: auto; display: block; border-radius: 6px; background: var(--field); max-width: 100%;
+}
+.pair img { aspect-ratio: var(--ar, 4/3); object-fit: cover; }
+.name { font-weight: 500; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.tag {
+  display: inline-block; font-size: 0.6875rem; font-weight: 700; letter-spacing: 0.05em;
+  border: 1px solid var(--line); color: var(--muted); border-radius: 4px; padding: 0 6px; margin-left: 6px; vertical-align: 2px;
+}
+.stats { font-family: var(--font-mono); font-size: 0.8125rem; font-variant-numeric: tabular-nums; color: var(--muted); display: flex; flex-wrap: wrap; gap: 4px 14px; }
+.stats b { color: var(--fg); font-weight: 600; }
+.stats .ok { color: var(--good); font-weight: 600; }
+textarea {
+  width: 100%; resize: vertical; font-family: var(--font-mono); font-size: 0.8125rem;
+  color: var(--fg); background: var(--field); border: 1px solid var(--line); border-radius: 6px; padding: 8px;
+  word-break: break-all; line-height: 1.45;
+}
+.out { height: 6.5em; }
+.actions { display: flex; flex-wrap: wrap; gap: 8px; }
+.btn {
+  font: inherit; font-size: 0.875rem; border-radius: 6px; padding: 6px 12px; cursor: pointer;
+  border: 1px solid var(--line); background: var(--field); color: var(--fg);
+}
+.btn.primary { background: var(--accent); border-color: var(--accent); color: var(--accent-fg); font-weight: 700; }
+.btn:hover { border-color: var(--accent); }
+.btn:focus-visible, .seg button:focus-visible, .chip:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
+.btn.ghost { background: transparent; color: var(--muted); }
+.busy { opacity: .55; }
+
+.viewer { background: var(--surface); border: 1px solid var(--line); border-radius: 10px; padding: 14px; display: flex; flex-direction: column; gap: 10px; }
+.viewer canvas { max-height: 70vh; width: auto; max-width: 100%; margin: 0 auto; }
+.empty { color: var(--muted); text-align: center; padding: 24px 8px; }
+
+/* JPG tab */
+.item {
+  background: var(--surface); border: 1px solid var(--line); border-radius: 10px;
+  padding: 14px; display: grid; grid-template-columns: 112px 1fr; gap: 14px;
+}
+.thumb { width: 112px; height: 112px; object-fit: cover; border-radius: 6px; background: var(--field); }
+.body { min-width: 0; display: flex; flex-direction: column; gap: 8px; }
+.item textarea { height: 3.6em; font-size: 0.75rem; color: var(--muted); }
+
+.toast {
+  position: fixed; left: 50%; transform: translateX(-50%);
+  bottom: calc(20px + env(safe-area-inset-bottom, 0px));
+  background: var(--fg); color: var(--bg); padding: 8px 16px; border-radius: 6px; font-size: 0.875rem;
+  opacity: 0; pointer-events: none; transition: opacity .2s; max-width: calc(100% - 32px);
+}
+.toast.show { opacity: 1; }
+
+@media (max-width: 520px) {
+  .item { grid-template-columns: 72px 1fr; }
+  .thumb { width: 72px; height: 72px; }
+}
+@media (prefers-reduced-motion: reduce) { * { transition: none !important; } }
+</style>
+
+</head>
+<body>
+<div class="wrap">
+  <header>
+    <h1>400자 짤 압축기</h1>
+    <p>사진을 댓글 한 줄(400자 안쪽)에 들어가는 글자로 바꿉니다. 받은 사람은 그 글자를 주소창에 붙여넣거나 이 페이지의 <b>보기</b> 탭에 붙여넣으면 사진을 봅니다. 모든 처리는 브라우저 안에서 끝나고 아무것도 업로드되지 않습니다.</p>
+  </header>
+
+  <nav class="tabs" role="tablist" aria-label="기능">
+    <button type="button" role="tab" id="tab-make" aria-controls="panel-make" aria-selected="true">만들기</button>
+    <button type="button" role="tab" id="tab-view" aria-controls="panel-view" aria-selected="false">보기</button>
+    <button type="button" role="tab" id="tab-jpg" aria-controls="panel-jpg" aria-selected="false">JPG data 링크</button>
+  </nav>
+
+  <!-- ===== 만들기 ===== -->
+  <section class="panel" id="panel-make" role="tabpanel" aria-labelledby="tab-make">
+    <div class="settings">
+      <div class="field">
+        <span class="label">코드 글자</span>
+        <div class="seg" role="group" aria-label="코드 글자">
+          <button type="button" data-fmt="hangul" aria-pressed="true">한글</button>
+          <button type="button" data-fmt="b64" aria-pressed="false">영문</button>
+        </div>
+        <span class="hint" id="fmt-hint"></span>
+      </div>
+      <div class="field">
+        <label class="label" for="limit">글자 수 제한</label>
+        <input type="number" id="limit" min="20" max="5000" step="10" value="400">
+        <div class="chips" role="group" aria-label="자주 쓰는 제한">
+          <button type="button" class="chip" data-len="400" aria-pressed="true">디시 댓글 400</button>
+          <button type="button" class="chip" data-len="280" aria-pressed="false">트윗 280</button>
+          <button type="button" class="chip" data-len="1000" aria-pressed="false">1,000</button>
+        </div>
+      </div>
+      <div class="field" id="base-field">
+        <label class="label" for="base">앞에 붙일 주소</label>
+        <input type="text" id="base" placeholder="비워 두면 코드만 만듭니다" spellcheck="false" autocapitalize="off">
+        <span class="hint" id="base-hint"></span>
+      </div>
+    </div>
+
+    <div class="drop" id="drop" tabindex="0" role="button" aria-label="이미지 파일 선택">
+      <strong>이미지를 여기에 끌어다 놓거나 클릭해서 고르세요</strong>
+      <span>여러 장 가능 · Ctrl/⌘+V로 붙여넣기도 됩니다</span>
+      <input type="file" id="file" accept="image/*" multiple hidden>
+    </div>
+
+    <section>
+      <div class="list-head">
+        <h2 id="summary">결과</h2>
+        <button type="button" class="btn ghost" id="clear">모두 지우기</button>
+      </div>
+      <div class="list" id="list" style="margin-top:12px"></div>
+    </section>
+  </section>
+
+  <!-- ===== 보기 ===== -->
+  <section class="panel" id="panel-view" role="tabpanel" aria-labelledby="tab-view" hidden>
+    <div class="field">
+      <label class="label" for="code-in">받은 코드나 링크</label>
+      <textarea id="code-in" rows="5" placeholder="댓글에서 복사한 한글 코드, 영문 코드, 또는 링크 전체를 붙여넣으세요"></textarea>
+      <span class="hint" id="view-hint">앞뒤에 다른 글이 섞여 있어도 코드 부분만 찾아 읽습니다.</span>
+    </div>
+    <div class="viewer" id="viewer">
+      <div class="empty" id="view-empty">코드를 붙여넣으면 여기에 사진이 나타납니다.</div>
+      <canvas id="view-canvas" hidden></canvas>
+      <div class="stats" id="view-stats"></div>
+    </div>
+  </section>
+
+  <!-- ===== JPG data 링크 ===== -->
+  <section class="panel" id="panel-jpg" role="tabpanel" aria-labelledby="tab-jpg" hidden>
+    <p class="hint" style="margin:0">글자 수 제한이 큰 곳(유튜브·레딧 1만 자 등)에서는 일반 JPG를 <code>data:</code> 링크로 바꾸는 쪽이 더 선명합니다. JPG는 파일 머리만 수백 자라서 400자 안에는 들어가지 않습니다.</p>
+    <div class="settings">
+      <div class="field">
+        <span class="label">압축 방식</span>
+        <div class="seg" role="group" aria-label="압축 방식">
+          <button type="button" id="mode-quality" aria-pressed="false">품질 지정</button>
+          <button type="button" id="mode-target" aria-pressed="true">목표 링크 길이</button>
+        </div>
+      </div>
+      <div class="field" id="quality-field" hidden>
+        <label class="label" for="quality">JPG 품질</label>
+        <div class="row">
+          <input type="range" id="quality" min="5" max="95" step="5" value="50">
+          <span class="num" id="quality-out">50</span>
+        </div>
+      </div>
+      <div class="field" id="target-field">
+        <label class="label" for="target">목표 링크 길이 (글자 수)</label>
+        <input type="number" id="target" min="500" max="5000000" step="500" value="9900">
+        <div class="chips" role="group" aria-label="댓글 글자 수 제한">
+          <button type="button" class="chip jchip" data-len="9900" aria-pressed="true">유튜브·레딧 1만</button>
+          <button type="button" class="chip jchip" data-len="2150" aria-pressed="false">인스타 2,200</button>
+          <button type="button" class="chip jchip" data-len="65000" aria-pressed="false">GitHub 65,536</button>
+        </div>
+      </div>
+      <div class="field">
+        <label class="label" for="maxside">긴 변 최대 크기</label>
+        <select id="maxside">
+          <option value="0">원본 크기 유지</option>
+          <option value="1920">1920px</option>
+          <option value="1280" selected>1280px</option>
+          <option value="800">800px</option>
+          <option value="480">480px</option>
+        </select>
+      </div>
+    </div>
+    <div class="drop" id="jdrop" tabindex="0" role="button" aria-label="JPG로 바꿀 이미지 선택">
+      <strong>JPG 링크로 바꿀 이미지를 끌어다 놓거나 클릭하세요</strong>
+      <span>여러 장 가능</span>
+      <input type="file" id="jfile" accept="image/*" multiple hidden>
+    </div>
+    <div class="list" id="jlist"></div>
+  </section>
+</div>
+
+<div class="toast" id="toast" role="status" aria-live="polite"></div>
+
+<script>
+// Tiny image codec: whole-image DCT in YCbCr, adaptive binary range coder,
+// text output in base64url (6 bits/char) or Hangul syllables (13 bits/char).
+const TinyCodec = (() => {
+  const GRID = 64;            // analysis grid, long side
+  const MAX_Y = 4095, MAX_C = 1023;
+  const B64 = "ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789-_";
+  const HANGUL0 = 0xAC00;
+
+  // ---- range coder (LZMA style, 11-bit probabilities) ----
+  const PBITS = 11, PONE = 1 << PBITS, SHIFT = 4;
+  class Enc {
+    constructor() { this.low = 0; this.range = 0xFFFFFFFF; this.cache = 0; this.cacheSize = 1; this.out = []; }
+    shiftLow() {
+      if (this.low < 0xFF000000 || this.low >= 0x100000000) {
+        const carry = this.low >= 0x100000000 ? 1 : 0;
+        let temp = this.cache;
+        do { this.out.push((temp + carry) & 0xFF); temp = 0xFF; } while (--this.cacheSize !== 0);
+        this.cache = Math.floor(this.low / 0x1000000) & 0xFF;
+      }
+      this.cacheSize++;
+      this.low = (this.low % 0x1000000) * 256;
+    }
+    bit(probs, i, b) {
+      const p = probs[i], bound = (this.range >>> PBITS) * p;
+      if (!b) { this.range = bound; probs[i] = p + ((PONE - p) >> SHIFT); }
+      else { this.low += bound; this.range = (this.range - bound) >>> 0; probs[i] = p - (p >> SHIFT); }
+      while (this.range < 0x1000000) { this.range = (this.range * 256) >>> 0; this.shiftLow(); }
+    }
+    raw(v, n) { for (let k = n - 1; k >= 0; k--) this.bit(FLAT, 0, (v >> k) & 1), FLAT[0] = PONE >> 1; }
+    finish() { for (let i = 0; i < 5; i++) this.shiftLow(); return this.out.slice(1); }
+  }
+  class Dec {
+    constructor(bytes) { this.b = bytes; this.pos = 0; this.range = 0xFFFFFFFF; this.code = 0; for (let i = 0; i < 4; i++) this.code = ((this.code * 256) + this.next()) >>> 0; }
+    next() { return this.pos < this.b.length ? this.b[this.pos++] : (this.pos++, 0); }
+    bit(probs, i) {
+      const p = probs[i], bound = (this.range >>> PBITS) * p;
+      let b;
+      if (this.code < bound) { this.range = bound; probs[i] = p + ((PONE - p) >> SHIFT); b = 0; }
+      else { this.code = (this.code - bound) >>> 0; this.range = (this.range - bound) >>> 0; probs[i] = p - (p >> SHIFT); b = 1; }
+      while (this.range < 0x1000000) { this.range = (this.range * 256) >>> 0; this.code = ((this.code * 256) + this.next()) >>> 0; }
+      return b;
+    }
+    raw(n) { let v = 0; for (let k = 0; k < n; k++) { v = (v << 1) | this.bit(FLAT, 0); FLAT[0] = PONE >> 1; } return v; }
+  }
+  const FLAT = new Uint16Array([PONE >> 1]);
+
+  // ---- geometry & coefficient order ----
+  function grid(aspect) {
+    const r = Math.pow(2, aspect / 16);
+    return r >= 1 ? { W: GRID, H: Math.max(4, Math.round(GRID / r)) } : { W: Math.max(4, Math.round(GRID * r)), H: GRID };
+  }
+  function aspectCode(w, h) { return Math.max(-31, Math.min(31, Math.round(Math.log2(w / h) * 16))); }
+  const orderCache = {};
+  function order(W, H) {
+    const key = W + "x" + H;
+    if (orderCache[key]) return orderCache[key];
+    const s = Math.sqrt(W * H), list = [];
+    for (let v = 0; v < H; v++) for (let u = 0; u < W; u++) {
+      if (u === 0 && v === 0) continue;
+      const fu = u * s / W, fv = v * s / H;
+      list.push({ u, v, r: Math.sqrt(fu * fu + fv * fv) });
+    }
+    list.sort((a, b) => a.r - b.r || a.v - b.v || a.u - b.u);
+    return (orderCache[key] = list);
+  }
+
+  // ---- parameters ----
+  const P = { base: 0.0002, growth: 1.06, beta: 0.11, chroma: 1.7, dz: 0.1, shrink: 0 };
+  function stepFor(q, r, ch) { return P.base * Math.pow(P.growth, q) * (1 + P.beta * r) * (ch ? P.chroma : 1); }
+
+  // ---- context model ----
+  const NB = 10; // frequency bands
+  function band(r) { return Math.min(NB - 1, Math.floor(Math.log2(1 + r) * 2.2)); }
+  function newModel() {
+    const m = { z: new Uint16Array(3 * NB * 3), g1: new Uint16Array(3 * NB), g2: new Uint16Array(3 * NB), eg: new Uint16Array(3 * 16), sg: new Uint16Array(3 * 2 * 3) };
+    for (const k in m) m[k].fill(PONE >> 1);
+    return m;
+  }
+  function codeLevels(io, enc, m, ch, levels, ord, n) {
+    // levels[k] for k < n follow ord; ctx uses previous two magnitudes
+    let a = 0, b = 0, ps = 1;
+    for (let k = 0; k < n; k++) {
+      const bd = band(ord[k].r);
+      const nctx = Math.min(2, (a ? 1 : 0) + (b ? 1 : 0));
+      const zi = (ch * NB + bd) * 3 + nctx;
+      let l = enc ? levels[k] : 0;
+      const nz = io.bit(m.z, zi, l !== 0);
+      let mag = 0;
+      if (nz) {
+        const gi = ch * NB + bd;
+        const sgi = (ch * 2 + (ps < 0 ? 1 : 0)) * 3 + Math.min(2, nctx);
+        const neg = io.bit(m.sg, sgi, enc ? l < 0 : 0);
+        const m0 = enc ? Math.abs(l) : 0;
+        if (!io.bit(m.g1, gi, m0 > 1)) mag = 1;
+        else if (!io.bit(m.g2, gi, m0 > 2)) mag = 2;
+        else {
+          // Exp-Golomb order 0 of (m0 - 3), adaptive prefix
+          const v = m0 - 3 + 1;
+          let nb = 0; if (enc) while ((v >> (nb + 1)) > 0) nb++;
+          let p = 0;
+          while (true) { const more = io.bit(m.eg, ch * 16 + Math.min(15, p), enc ? p < nb : 0); if (!more) break; p++; }
+          let val = 1;
+          for (let i = p - 1; i >= 0; i--) val = (val << 1) | io.bit(FLAT, 0, enc ? (v >> i) & 1 : 0, true);
+          mag = val - 1 + 3;
+        }
+        l = neg ? -mag : mag;
+        ps = l;
+        if (!enc) levels[k] = l;
+      }
+      b = a; a = Math.abs(l);
+    }
+  }
+  // adapter so encoder/decoder share codeLevels
+  function encIO(e) { return { bit(pr, i, v, flat) { e.bit(pr, i, v ? 1 : 0); if (pr === FLAT) FLAT[0] = PONE >> 1; return v ? 1 : 0; } }; }
+  function decIO(d) { return { bit(pr, i) { const v = d.bit(pr, i); if (pr === FLAT) FLAT[0] = PONE >> 1; return v; } }; }
+
+  // ---- forward transform ----
+  function analyze(rgba, W, H) {
+    const n = W * H, Y = new Float64Array(n), Cb = new Float64Array(n), Cr = new Float64Array(n);
+    for (let i = 0; i < n; i++) {
+      const r = rgba[i * 4] / 255, g = rgba[i * 4 + 1] / 255, b = rgba[i * 4 + 2] / 255;
+      Y[i] = 0.299 * r + 0.587 * g + 0.114 * b;
+      Cb[i] = -0.168736 * r - 0.331264 * g + 0.5 * b;
+      Cr[i] = 0.5 * r - 0.418688 * g - 0.081312 * b;
+    }
+    return [Y, Cb, Cr].map((c) => dct(c, W, H));
+  }
+  function cosTable(N, M) { // M samples of N basis functions at grid positions
+    const t = new Float64Array(N * M);
+    for (let u = 0; u < N; u++) for (let x = 0; x < M; x++) {
+      const pos = (x + 0.5) * N / M; // in grid units
+      t[u * M + x] = Math.cos(Math.PI * pos * u / N);
+    }
+    return t;
+  }
+  function dct(c, W, H) {
+    const cx = cosTable(W, W), cy = cosTable(H, H), tmp = new Float64Array(W * H), out = new Float64Array(W * H);
+    for (let y = 0; y < H; y++) for (let u = 0; u < W; u++) { let s = 0; for (let x = 0; x < W; x++) s += c[y * W + x] * cx[u * W + x]; tmp[y * W + u] = s * (u ? 2 : 1) / W; }
+    for (let v = 0; v < H; v++) for (let u = 0; u < W; u++) { let s = 0; for (let y = 0; y < H; y++) s += tmp[y * W + u] * cy[v * H + y]; out[v * W + u] = s * (v ? 2 : 1) / H; }
+    return out;
+  }
+
+  // ---- quantize & bitstream ----
+  function quantize(coefs, W, H, q) {
+    const ord = order(W, H), res = [];
+    for (let ch = 0; ch < 3; ch++) {
+      const max = ch ? MAX_C : MAX_Y, lv = new Int32Array(max);
+      let last = 0;
+      for (let k = 0; k < Math.min(max, ord.length); k++) {
+        const o = ord[k], x = coefs[ch][o.v * W + o.u], st = stepFor(q, o.r, ch);
+        const a = Math.floor(Math.abs(x) / st + 0.5 - P.dz);
+        if (a > 0) { lv[k] = x < 0 ? -a : a; last = k + 1; }
+      }
+      res.push({ lv, n: last });
+    }
+    return res;
+  }
+  function dcQuant(coefs) {
+    const y = Math.max(0, Math.min(63, Math.round(coefs[0][0] * 63)));
+    const cb = Math.max(0, Math.min(31, Math.round((coefs[1][0] + 0.5) * 31)));
+    const cr = Math.max(0, Math.min(31, Math.round((coefs[2][0] + 0.5) * 31)));
+    return [y, cb, cr];
+  }
+  function writeStream(aspect, q, dc, ql, W, H) {
+    const e = new Enc(), io = encIO(e), m = newModel(), ord = order(W, H);
+    e.raw(0, 1);                 // version
+    e.raw(aspect + 32, 6);
+    e.raw(q, 7);
+    e.raw(dc[0], 6); e.raw(dc[1], 5); e.raw(dc[2], 5);
+    e.raw(ql[0].n, 12); e.raw(ql[1].n, 10); e.raw(ql[2].n, 10);
+    for (let ch = 0; ch < 3; ch++) codeLevels(io, true, m, ch, ql[ch].lv, ord, ql[ch].n);
+    return e.finish();
+  }
+  function readStream(bytes) {
+    const d = new Dec(bytes), io = decIO(d), m = newModel();
+    const ver = d.raw(1);
+    if (ver !== 0) throw new Error("bad version");
+    const aspect = d.raw(6) - 32, q = d.raw(7);
+    const dc = [d.raw(6), d.raw(5), d.raw(5)];
+    const ns = [d.raw(12), d.raw(10), d.raw(10)];
+    const { W, H } = grid(aspect), ord = order(W, H);
+    if (ns[0] > Math.min(MAX_Y, ord.length) || ns[1] > Math.min(MAX_C, ord.length) || ns[2] > Math.min(MAX_C, ord.length)) throw new Error("corrupt");
+    const ql = ns.map((n, ch) => { const lv = new Int32Array(ch ? MAX_C : MAX_Y); codeLevels(io, false, m, ch, lv, ord, n); return { lv, n }; });
+    return { aspect, q, dc, ql, W, H };
+  }
+
+  // ---- text packing ----
+  function bytesToText(bytes, mode) {
+    const bpc = mode === "hangul" ? 13 : 6;
+    let s = "", acc = 0, nb = 0;
+    const emit = (v) => { s += mode === "hangul" ? String.fromCharCode(HANGUL0 + v) : B64[v]; };
+    for (const b of bytes) {
+      acc = (acc << 8) | b; nb += 8;
+      while (nb >= bpc) { nb -= bpc; emit((acc >> nb) & ((1 << bpc) - 1)); acc &= (1 << nb) - 1; }
+    }
+    if (nb > 0) emit((acc << (bpc - nb)) & ((1 << bpc) - 1));
+    return s;
+  }
+  function textToBytes(s) {
+    const out = []; let acc = 0, nb = 0;
+    for (const ch of s) {
+      const c = ch.charCodeAt(0);
+      let v, bpc;
+      if (c >= HANGUL0 && c < HANGUL0 + 8192) { v = c - HANGUL0; bpc = 13; }
+      else { v = B64.indexOf(ch); bpc = 6; if (v < 0) continue; }
+      acc = (acc * (1 << bpc)) + v; nb += bpc;
+      while (nb >= 8) { nb -= 8; out.push(Math.floor(acc / Math.pow(2, nb)) & 0xFF); acc = acc % Math.pow(2, nb); }
+    }
+    return out;
+  }
+  function sameLevels(a, b) {
+    if (a.aspect !== b.aspect || a.q !== b.q || a.dc.join() !== b.dc.join()) return false;
+    for (let ch = 0; ch < 3; ch++) {
+      if (a.ql[ch].n !== b.ql[ch].n) return false;
+      for (let k = 0; k < a.ql[ch].n; k++) if (a.ql[ch].lv[k] !== b.ql[ch].lv[k]) return false;
+    }
+    return true;
+  }
+  function pack(bytes, mode, ref) {
+    // drop trailing characters while the stream still decodes identically (decoder pads with zeros)
+    let t = bytesToText(bytes, mode);
+    while (t.length > 1) {
+      const c = t.slice(0, -1);
+      let ok = false;
+      try { ok = sameLevels(readStream(textToBytes(c)), ref); } catch (_) {}
+      if (!ok) break;
+      t = c;
+    }
+    return t;
+  }
+
+  // ---- public API ----
+  // rgba: pixels at grid(aspect) size. Finds the finest quantizer whose text fits maxChars.
+  function encode(rgba, aspect, maxChars, mode) {
+    const { W, H } = grid(aspect), coefs = analyze(rgba, W, H), dc = dcQuant(coefs);
+    let best = null;
+    let lo = 0, hi = 127;
+    while (lo <= hi) {
+      const q = (lo + hi) >> 1;
+      const ql = quantize(coefs, W, H, q);
+      const bytes = writeStream(aspect, q, dc, ql, W, H);
+      // cheap estimate first, exact pack only when near the limit
+      const est = Math.ceil(bytes.length * 8 / (mode === "hangul" ? 13 : 6));
+      let text = null;
+      if (est <= maxChars + 2) text = pack(bytes, mode, { aspect, q, dc, ql });
+      if (text && text.length <= maxChars) { best = { text, q }; hi = q - 1; }
+      else lo = q + 1;
+    }
+    if (!best) {
+      const ql = quantize(coefs, W, H, 127);
+      ql.forEach((c) => (c.n = 0));
+      const bytes = writeStream(aspect, 127, dc, ql, W, H);
+      best = { text: pack(bytes, mode, { aspect, q: 127, dc, ql }), q: 127 };
+    }
+    return best;
+  }
+  function decode(text) {
+    const s = readStream(textToBytes(text));
+    const { W, H } = s, ord = order(W, H);
+    const coefs = [0, 1, 2].map(() => new Float64Array(W * H));
+    coefs[0][0] = s.dc[0] / 63; coefs[1][0] = s.dc[1] / 31 - 0.5; coefs[2][0] = s.dc[2] / 31 - 0.5;
+    for (let ch = 0; ch < 3; ch++) for (let k = 0; k < s.ql[ch].n; k++) {
+      const l = s.ql[ch].lv[k]; if (!l) continue;
+      const o = ord[k], st = stepFor(s.q, o.r, ch);
+      coefs[ch][o.v * W + o.u] = Math.sign(l) * (Math.abs(l) - P.shrink) * st;
+    }
+    return { W, H, coefs, q: s.q, aspect: s.aspect };
+  }
+  // Render decoded image at outW x outH by evaluating the cosine series (smooth upscaling).
+  function render(dec, outW, outH) {
+    const { W, H, coefs } = dec;
+    const cx = cosTable(W, outW), cy = cosTable(H, outH);
+    const planes = coefs.map((A) => {
+      // which rows (v) have nonzero coefficients
+      const T = new Float64Array(H * outW), rows = [];
+      for (let v = 0; v < H; v++) {
+        let any = false;
+        for (let u = 0; u < W; u++) { const a = A[v * W + u]; if (!a) continue; any = true; for (let x = 0; x < outW; x++) T[v * outW + x] += a * cx[u * outW + x]; }
+        if (any) rows.push(v);
+      }
+      const P2 = new Float64Array(outW * outH);
+      for (const v of rows) for (let y = 0; y < outH; y++) { const c = cy[v * outH + y]; const o = y * outW, t = v * outW; for (let x = 0; x < outW; x++) P2[o + x] += c * T[t + x]; }
+      return P2;
+    });
+    const out = new Uint8ClampedArray(outW * outH * 4);
+    for (let i = 0; i < outW * outH; i++) {
+      const Y = planes[0][i], Cb = planes[1][i], Cr = planes[2][i];
+      out[i * 4] = (Y + 1.402 * Cr) * 255;
+      out[i * 4 + 1] = (Y - 0.344136 * Cb - 0.714136 * Cr) * 255;
+      out[i * 4 + 2] = (Y + 1.772 * Cb) * 255;
+      out[i * 4 + 3] = 255;
+    }
+    return out;
+  }
+  return { grid, aspectCode, encode, decode, render };
+})();
+
+</script>
+<script>
+const $ = (id) => document.getElementById(id);
+const store = {
+  get(k) { try { return localStorage.getItem(k); } catch (_) { return null; } },
+  set(k, v) { try { localStorage.setItem(k, v); } catch (_) {} },
+};
+
+// ---------- shared helpers ----------
+let toastTimer;
+function toast(msg) {
+  const t = $("toast");
+  t.textContent = msg; t.classList.add("show");
+  clearTimeout(toastTimer);
+  toastTimer = setTimeout(() => t.classList.remove("show"), 2400);
+}
+function copy(text, ta) {
+  const done = () => toast(`복사했습니다 (${text.length.toLocaleString()}자)`);
+  const fallback = () => { ta.focus(); ta.select(); toast("선택해 두었습니다. Ctrl/⌘+C로 복사하세요"); };
+  try { navigator.clipboard.writeText(text).then(done, fallback); } catch (_) { fallback(); }
+}
+function loadImage(blob) {
+  return new Promise((resolve, reject) => {
+    const img = new Image();
+    img.onload = () => resolve(img);
+    img.onerror = () => reject(new Error("이미지를 읽을 수 없습니다"));
+    img.src = URL.createObjectURL(blob);
+  });
+}
+function fmtBytes(n) {
+  if (n < 1024) return n + " B";
+  if (n < 1024 * 1024) return (n / 1024).toFixed(1) + " KB";
+  return (n / 1024 / 1024).toFixed(2) + " MB";
+}
+function wireDrop(drop, input, onFiles) {
+  drop.onclick = () => input.click();
+  drop.onkeydown = (e) => { if (e.key === "Enter" || e.key === " ") { e.preventDefault(); input.click(); } };
+  input.onchange = (e) => { onFiles([...e.target.files]); e.target.value = ""; };
+  ["dragenter", "dragover"].forEach((t) => drop.addEventListener(t, (e) => { e.preventDefault(); drop.classList.add("over"); }));
+  ["dragleave", "drop"].forEach((t) => drop.addEventListener(t, (e) => { e.preventDefault(); drop.classList.remove("over"); }));
+  drop.addEventListener("drop", (e) => onFiles([...e.dataTransfer.files]));
+}
+
+// ---------- tabs ----------
+const tabs = ["make", "view", "jpg"];
+function showTab(name) {
+  for (const t of tabs) {
+    $("tab-" + t).setAttribute("aria-selected", t === name);
+    $("panel-" + t).hidden = t !== name;
+  }
+  store.set("tab", name);
+}
+tabs.forEach((t) => ($("tab-" + t).onclick = () => showTab(t)));
+
+// ---------- 400자 코덱: 만들기 ----------
+const mk = { fmt: store.get("fmt") === "b64" ? "b64" : "hangul", limit: 400, base: store.get("linkPrefix") ?? defaultBase() };
+const items = [];
+let nextId = 1;
+
+// Links look like https://g.yeon.at/?<code>; the scheme is what makes comment boxes turn them into hyperlinks.
+function defaultBase() {
+  const l = location;
+  if (!/^https?:$/.test(l.protocol) || /claude/.test(l.hostname)) return "https://g.yeon.at/?";
+  return l.origin + l.pathname.replace(/index\.html$/, "") + "?";
+}
+
+// Box-like downscale by repeated halving, then to the codec's analysis grid.
+function toGrid(img, W, H) {
+  let src = img, w = img.naturalWidth, h = img.naturalHeight;
+  const step = (nw, nh) => {
+    const c = document.createElement("canvas");
+    c.width = nw; c.height = nh;
+    const g = c.getContext("2d");
+    g.fillStyle = "#ffffff"; g.fillRect(0, 0, nw, nh);
+    g.imageSmoothingQuality = "high";
+    g.drawImage(src, 0, 0, nw, nh);
+    src = c; return g;
+  };
+  while (w / 2 >= W * 2 && h / 2 >= H * 2) { w = Math.round(w / 2); h = Math.round(h / 2); step(w, h); }
+  return step(W, H).getImageData(0, 0, W, H).data;
+}
+
+function budget() { return Math.max(10, mk.limit - mk.base.length); }
+function codecMode() { return mk.fmt; }
+function shareText(code) { return mk.base + code; }
+
+function drawDecoded(canvas, code, longSide) {
+  const dec = TinyCodec.decode(code);
+  const r = dec.W / dec.H;
+  const w = r >= 1 ? longSide : Math.round(longSide * r);
+  const h = r >= 1 ? Math.round(longSide / r) : longSide;
+  canvas.width = w; canvas.height = h;
+  canvas.getContext("2d").putImageData(new ImageData(TinyCodec.render(dec, w, h), w, h), 0, 0);
+  return dec;
+}
+
+function encodeItem(item) {
+  const a = TinyCodec.aspectCode(item.img.naturalWidth, item.img.naturalHeight);
+  const { W, H } = TinyCodec.grid(a);
+  if (!item.grid || item.grid.a !== a) item.grid = { a, px: toGrid(item.img, W, H) };
+  const r = TinyCodec.encode(item.grid.px, a, budget(), codecMode());
+  item.result = { code: r.text, q: r.q, text: shareText(r.text) };
+}
+
+function renderItem(item) {
+  const el = item.el, r = item.result;
+  drawDecoded(el.querySelector("canvas"), r.code, 480);
+  const len = r.text.length;
+  const fits = len <= mk.limit;
+  el.querySelector(".stats").innerHTML =
+    `<span>원본 ${fmtBytes(item.size)}</span>` +
+    `<span>코드 <b>${r.code.length}자</b></span>` +
+    `<span class="${fits ? "ok" : ""}">전체 ${len}/${mk.limit}자</span>` +
+    `<span>압축 단계 ${r.q}</span>`;
+  el.querySelector("textarea").value = r.text;
+}
+
+function buildCard(item) {
+  const el = document.createElement("article");
+  el.className = "card";
+  el.innerHTML = `
+    <div class="name"></div>
+    <div class="pair">
+      <figure><img alt=""><figcaption>원본</figcaption></figure>
+      <figure><canvas aria-label="받는 사람이 보게 될 사진"></canvas><figcaption>받는 사람이 보는 사진</figcaption></figure>
+    </div>
+    <div class="stats"></div>
+    <textarea class="out" readonly aria-label="공유할 코드" id="code-${item.id}"></textarea>
+    <div class="actions">
+      <button type="button" class="btn primary" data-act="copy">복사</button>
+      <button type="button" class="btn" data-act="view">보기 탭에서 확인</button>
+      <button type="button" class="btn ghost" data-act="remove">삭제</button>
+    </div>`;
+  const name = el.querySelector(".name");
+  name.textContent = item.name; name.title = item.name;
+  if (item.sample) { const t = document.createElement("span"); t.className = "tag"; t.textContent = "예시"; name.appendChild(t); }
+  const img = el.querySelector("img");
+  img.src = item.img.src; img.alt = item.name + " 원본";
+  el.querySelector(".pair").style.setProperty("--ar", `${item.img.naturalWidth}/${item.img.naturalHeight}`);
+  el.addEventListener("click", (e) => {
+    const b = e.target.closest("button[data-act]");
+    if (!b || !item.result) return;
+    if (b.dataset.act === "remove") { items.splice(items.indexOf(item), 1); el.remove(); updateSummary(); }
+    else if (b.dataset.act === "copy") copy(item.result.text, el.querySelector("textarea"));
+    else { $("code-in").value = item.result.text; showTab("view"); viewCode(); }
+  });
+  item.el = el;
+  return el;
+}
+
+function updateSummary() {
+  $("summary").textContent = items.length ? `${items.length}장` : "결과 없음 — 위에 이미지를 넣어 보세요";
+}
+
+async function addFiles(files, sample = false) {
+  for (const file of files) {
+    if (!file.type.startsWith("image/")) { toast(`${file.name}: 이미지 파일이 아닙니다`); continue; }
+    let img;
+    try { img = await loadImage(file); } catch (e) { toast(`${file.name}: ${e.message}`); continue; }
+    const item = { id: nextId++, name: file.name || "붙여넣은 이미지", size: file.size, img, sample };
+    items.unshift(item);
+    $("list").prepend(buildCard(item));
+    item.el.classList.add("busy");
+    await new Promise((r) => setTimeout(r, 0));
+    encodeItem(item); renderItem(item);
+    item.el.classList.remove("busy");
+    updateSummary();
+  }
+}
+
+let rerunTimer;
+function rerunAll() {
+  clearTimeout(rerunTimer);
+  rerunTimer = setTimeout(async () => {
+    for (const item of items) {
+      item.el.classList.add("busy");
+      await new Promise((r) => setTimeout(r, 0));
+      encodeItem(item); renderItem(item);
+      item.el.classList.remove("busy");
+    }
+  }, 200);
+}
+
+const FMT_HINT = {
+  hangul: "한 글자에 13비트를 담아 가장 선명합니다.",
+  b64: "영문·숫자만 씁니다. 한글을 못 쓰는 곳용이며 한글보다 약 2배 흐립니다.",
+};
+function syncSettings() {
+  document.querySelectorAll("[data-fmt]").forEach((b) => b.setAttribute("aria-pressed", b.dataset.fmt === mk.fmt));
+  $("fmt-hint").textContent = FMT_HINT[mk.fmt];
+  $("base-hint").textContent = mk.base
+    ? `주소가 ${mk.base.length}자를 쓰고, 사진에 ${budget()}자가 남습니다. https://로 시작해야 댓글에서 눌리는 링크가 됩니다.`
+    : "코드만 만듭니다. 받은 사람은 보기 탭에 붙여넣습니다.";
+  document.querySelectorAll(".chip[data-len]:not(.jchip)").forEach((c) => c.setAttribute("aria-pressed", Number(c.dataset.len) === mk.limit));
+}
+document.querySelectorAll("[data-fmt]").forEach((b) => (b.onclick = () => { mk.fmt = b.dataset.fmt; store.set("fmt", mk.fmt); syncSettings(); rerunAll(); }));
+$("limit").oninput = (e) => { const v = Number(e.target.value); if (v >= 20) { mk.limit = v; syncSettings(); rerunAll(); } };
+document.querySelectorAll(".chip[data-len]:not(.jchip)").forEach((c) => (c.onclick = () => { mk.limit = Number(c.dataset.len); $("limit").value = mk.limit; syncSettings(); rerunAll(); }));
+$("base").value = mk.base;
+$("base").oninput = (e) => { mk.base = e.target.value.trim(); store.set("linkPrefix", mk.base); syncSettings(); rerunAll(); };
+$("clear").onclick = () => { items.length = 0; $("list").innerHTML = ""; updateSummary(); };
+wireDrop($("drop"), $("file"), (f) => addFiles(f));
+document.addEventListener("paste", (e) => {
+  if (e.target.closest && e.target.closest("textarea, input")) return;
+  const files = [...(e.clipboardData?.items || [])].filter((i) => i.kind === "file" && i.type.startsWith("image/")).map((i) => i.getAsFile()).filter(Boolean);
+  if (!files.length) return;
+  if (!$("panel-jpg").hidden) addJpgFiles(files); else { showTab("make"); addFiles(files); }
+});
+
+// ---------- 400자 코덱: 보기 ----------
+// Pull the code out of whatever was pasted: the longest Hangul run, else the longest URL-safe run after '?' or '#'.
+function extractCode(s) {
+  const longest = (arr) => (arr || []).reduce((a, b) => (b.length > a.length ? b : a), "");
+  const han = longest(s.match(/[가-쯿]+/g));
+  if (han.length >= 4) return han;
+  const h = Math.max(s.lastIndexOf("#"), s.lastIndexOf("?"));
+  return longest((h >= 0 ? s.slice(h + 1) : s).match(/[A-Za-z0-9_-]+/g));
+}
+function viewCode() {
+  const code = extractCode($("code-in").value);
+  const cv = $("view-canvas");
+  if (!code) { cv.hidden = true; $("view-empty").hidden = false; $("view-empty").textContent = "코드를 붙여넣으면 여기에 사진이 나타납니다."; $("view-stats").innerHTML = ""; return; }
+  try {
+    const dec = drawDecoded(cv, code, 960);
+    cv.hidden = false; $("view-empty").hidden = true;
+    $("view-stats").innerHTML = `<span>코드 <b>${code.length}자</b></span><span>${/[가-쯿]/.test(code) ? "한글 코드" : "영문 코드"}</span><span>압축 단계 ${dec.q}</span>`;
+  } catch (_) {
+    cv.hidden = true; $("view-empty").hidden = false;
+    $("view-empty").textContent = "이 글자로는 사진을 만들 수 없습니다. 코드가 잘리지 않았는지, 이 페이지에서 만든 코드인지 확인하세요.";
+    $("view-stats").innerHTML = "";
+  }
+}
+$("code-in").oninput = viewCode;
+
+// ---------- JPG data 링크 ----------
+const js = { mode: "target", quality: 0.5, targetLen: 9900, maxSide: 1280 };
+const jitems = [];
+const jcanvas = document.createElement("canvas");
+const jctx = jcanvas.getContext("2d");
+function dataUrlBytes(url) {
+  const b64 = url.slice(url.indexOf(",") + 1);
+  const pad = b64.endsWith("==") ? 2 : b64.endsWith("=") ? 1 : 0;
+  return Math.floor(b64.length * 3 / 4) - pad;
+}
+function jencode(img, scale, q) {
+  const w = Math.max(1, Math.round(img.naturalWidth * scale));
+  const h = Math.max(1, Math.round(img.naturalHeight * scale));
+  jcanvas.width = w; jcanvas.height = h;
+  jctx.fillStyle = "#ffffff"; jctx.fillRect(0, 0, w, h);
+  jctx.imageSmoothingQuality = "high";
+  jctx.drawImage(img, 0, 0, w, h);
+  const url = jcanvas.toDataURL("image/jpeg", q);
+  return { url, bytes: dataUrlBytes(url), w, h, q };
+}
+function jcompress(img) {
+  const long = Math.max(img.naturalWidth, img.naturalHeight);
+  const s0 = js.maxSide && long > js.maxSide ? js.maxSide / long : 1;
+  if (js.mode === "quality") return jencode(img, s0, js.quality);
+  const factors = [1, 0.8, 0.64, 0.5, 0.4, 0.3, 0.22, 0.15, 0.1, 0.06, 0.03];
+  let best = null;
+  for (const f of factors) {
+    let lo = 0.05, hi = 0.92, fit = null;
+    for (let i = 0; i < 7; i++) {
+      const mid = (lo + hi) / 2, r = jencode(img, s0 * f, mid);
+      if (r.url.length <= js.targetLen) { fit = r; lo = mid; } else hi = mid;
+    }
+    if (fit && fit.q >= 0.35) return fit;
+    if (fit && !best) best = fit;
+  }
+  return best || jencode(img, s0 * factors[factors.length - 1], 0.05);
+}
+function jrender(item) {
+  const r = item.result, el = item.el;
+  el.querySelector(".thumb").src = r.url;
+  el.querySelector(".stats").innerHTML =
+    `<span>${fmtBytes(item.size)} → <b>${fmtBytes(r.bytes)}</b></span><span>${r.w}×${r.h}px</span>` +
+    `<span>품질 ${Math.round(r.q * 100)}</span><span>링크 <b>${r.url.length.toLocaleString()}자</b></span>` +
+    (js.mode === "target" && r.url.length > js.targetLen ? `<span>목표보다 김</span>` : "");
+  el.querySelector("textarea").value = r.url;
+}
+function jbuild(item) {
+  const el = document.createElement("article");
+  el.className = "item";
+  el.innerHTML = `<img class="thumb" alt=""><div class="body"><div class="name"></div><div class="stats"></div>
+    <textarea readonly aria-label="data 링크" id="jlink-${item.id}"></textarea>
+    <div class="actions"><button type="button" class="btn primary" data-copy="url">링크 복사</button>
+    <button type="button" class="btn" data-copy="img">&lt;img&gt; 태그 복사</button>
+    <button type="button" class="btn" data-copy="md">마크다운 복사</button>
+    <button type="button" class="btn ghost" data-remove>삭제</button></div></div>`;
+  el.querySelector(".name").textContent = item.name;
+  el.querySelector(".thumb").alt = item.name + " 압축 결과";
+  el.addEventListener("click", (e) => {
+    const btn = e.target.closest("button");
+    if (!btn || !item.result) return;
+    if (btn.hasAttribute("data-remove")) { jitems.splice(jitems.indexOf(item), 1); el.remove(); return; }
+    const url = item.result.url, alt = item.name.replace(/\.[^.]+$/, "").replace(/["\]\[]/g, "");
+    copy(btn.dataset.copy === "img" ? `<img src="${url}" alt="${alt}">` : btn.dataset.copy === "md" ? `![${alt}](${url})` : url, el.querySelector("textarea"));
+  });
+  item.el = el;
+  return el;
+}
+async function addJpgFiles(files) {
+  for (const file of files) {
+    if (!file.type.startsWith("image/")) continue;
+    let img;
+    try { img = await loadImage(file); } catch (e) { toast(e.message); continue; }
+    const item = { id: nextId++, name: file.name || "붙여넣은 이미지", size: file.size, img };
+    jitems.unshift(item);
+    $("jlist").prepend(jbuild(item));
+    item.el.classList.add("busy");
+    await new Promise((r) => setTimeout(r, 0));
+    item.result = jcompress(img); jrender(item);
+    item.el.classList.remove("busy");
+  }
+}
+let jTimer;
+function jrerun() {
+  clearTimeout(jTimer);
+  jTimer = setTimeout(async () => {
+    for (const item of jitems) { await new Promise((r) => setTimeout(r, 0)); item.result = jcompress(item.img); jrender(item); }
+  }, 250);
+}
+function jsetMode(m) {
+  js.mode = m;
+  $("mode-quality").setAttribute("aria-pressed", m === "quality");
+  $("mode-target").setAttribute("aria-pressed", m === "target");
+  $("quality-field").hidden = m !== "quality";
+  $("target-field").hidden = m !== "target";
+  jrerun();
+}
+$("mode-quality").onclick = () => jsetMode("quality");
+$("mode-target").onclick = () => jsetMode("target");
+$("quality").oninput = (e) => { $("quality-out").textContent = e.target.value; js.quality = e.target.value / 100; jrerun(); };
+$("target").oninput = (e) => { const v = Number(e.target.value); if (v >= 500) { js.targetLen = v; jmark(); jrerun(); } };
+function jmark() { document.querySelectorAll(".jchip").forEach((c) => c.setAttribute("aria-pressed", Number(c.dataset.len) === js.targetLen)); }
+document.querySelectorAll(".jchip").forEach((c) => (c.onclick = () => { js.targetLen = Number(c.dataset.len); $("target").value = c.dataset.len; jmark(); jrerun(); }));
+$("maxside").onchange = (e) => { js.maxSide = Number(e.target.value); jrerun(); };
+wireDrop($("jdrop"), $("jfile"), addJpgFiles);
+
+// ---------- start ----------
+function makeSample() {
+  const c = document.createElement("canvas");
+  c.width = 1200; c.height = 800;
+  const g = c.getContext("2d");
+  const sky = g.createLinearGradient(0, 0, 0, 800);
+  sky.addColorStop(0, "#1e3a8a"); sky.addColorStop(0.55, "#f59e0b"); sky.addColorStop(1, "#7c2d12");
+  g.fillStyle = sky; g.fillRect(0, 0, 1200, 800);
+  g.fillStyle = "#fde68a"; g.beginPath(); g.arc(850, 410, 90, 0, Math.PI * 2); g.fill();
+  ["#3b1d0e", "#26130a", "#140a05"].forEach((col, i) => {
+    g.fillStyle = col; g.beginPath(); g.moveTo(0, 800);
+    for (let x = 0; x <= 1200; x += 20) g.lineTo(x, 525 + i * 80 + Math.sin(x / (90 + i * 35) + i) * (45 - i * 10));
+    g.lineTo(1200, 800); g.fill();
+  });
+  return new Promise((r) => c.toBlob((b) => r(new File([b], "노을-예시.png", { type: "image/png" })), "image/png"));
+}
+
+syncSettings();
+updateSummary();
+// A link like https://g.yeon.at/?<code> (or #<code>) opens straight into the viewer.
+function openFromUrl() {
+  let s = "";
+  try { s = decodeURIComponent((location.search.slice(1) || location.hash.slice(1)).replace(/\+/g, " ")); } catch (_) {}
+  const code = extractCode(s);
+  if (!code) return false;
+  $("code-in").value = code; showTab("view"); viewCode();
+  return true;
+}
+window.addEventListener("hashchange", openFromUrl);
+if (!openFromUrl()) showTab(store.get("tab") === "jpg" ? "jpg" : store.get("tab") === "view" ? "view" : "make");
+makeSample().then((f) => addFiles([f], true));
+</script>
+</body>
+</html>
