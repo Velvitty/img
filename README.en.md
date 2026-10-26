@@ -274,189 +274,159 @@ These notes are the same as those attached to each part of the detailed document
 
 #### Design notes: problem statement
 
-- **What:** A lossy image format that fits in one comment line (400 characters), and a browser page that creates and decodes it.
-- **Why:** DCInside comments are limited to 400 characters, cannot carry attachments, and do not show `data:` links as images. To send a photo, the photo itself has to be written out as text.
-- **How (method and technique):** The classic lossy pipeline of transform coding (DCT) → quantization → context-adaptive binary arithmetic coding → text packing, redesigned for an extremely small budget of a few hundred bytes.
-- **Mathematical approach:** One character carries `log2(alphabet size)` bits: `log2 64 = 6` for base64url and `log2 8192 = 13` for the 8,192 Hangul syllables used. After the 19-character address, 381 characters × 13 bits = 4,953 bits ≈ 619 bytes is all the photo gets. By Shannon's source coding theorem [7] the average code length cannot go below the model's entropy, so the design needs both a model that describes photos with low entropy (transform plus context model) and a coder that gets close to that entropy (arithmetic coding).
-- **Engineering approach:** It must run from one static file with no server, and the code must be the entire data (self-contained). So there is no storage, no upload and no account.
-- **Why this choice (alternatives):** (1) Links to an image host are short but depend on an upload and a server's lifetime, which conflicts with the no-upload requirement. (2) A JPEG `data:` link spends about 600 bytes on quantization and Huffman tables alone, over 800 characters in base64 [3][4][26]. (3) BlurHash [33] and ThumbHash [34] target placeholders of a few dozen characters with a fixed number of components (BlurHash allows at most 9 per axis), so they cannot use a 400-character budget. A dedicated codec whose quality grows with the budget was built instead.
-- **Value:** No server cost or privacy risk, and as long as the text is copied, it decodes to the same photo anywhere, indefinitely.
-- **Limitations:** The information ceiling is hard, so results cannot go beyond a blurry preview. Whether DCInside autolinks a link containing Hangul all the way through has not been verified.
-- **Sources:** [3], [4], [7], [26], [33], [34]
+A DCInside comment cannot exceed 400 characters, cannot carry an attached image, and does not show `data:` links as pictures. Under these conditions the only way to pass on a photo is to write the photo itself as text. This project therefore designs a lossy format that fits in one comment line together with a browser page that creates and decodes it. The compression follows the classic chain of transform coding (DCT), quantization, context-adaptive binary arithmetic coding and text packing, but every stage is re-tuned for a budget of only a few hundred bytes.
+
+The budget starts with how much one character can carry: `log2(alphabet size)` bits. base64url carries `log2 64 = 6` bits, and the 8,192 Hangul syllables used here carry `log2 8192 = 13` bits. The 381 characters left after the 19-character address, at 13 bits each, give 4,953 bits, about 619 bytes, for the whole photo. By Shannon's source coding theorem [7] the average code length cannot fall below the model's entropy. A recognizable picture fits in this budget only with both a model that describes photos with low entropy (a transform and a context model) and a coder that comes close to that entropy (arithmetic coding).
+
+Other routes were weighed. A link to an image host is short but depends on an upload and on a server's lifetime, which conflicts with the goal of a code that is complete without any server. A JPEG `data:` link spends about 600 bytes on quantization and Huffman tables alone, more than 800 characters in base64 [3][4][26]. BlurHash [33] and ThumbHash [34] are built for placeholders of a few dozen characters with a fixed number of components (BlurHash allows at most 9 per axis), so they cannot use a 400-character budget. Hence a dedicated codec whose quality keeps growing as the budget grows.
+
+The design brings no server cost and no privacy risk, and as long as the text is copied it decodes to the same photo anywhere. In return the information ceiling is hard: at 400 characters the result cannot go beyond a blurry preview. Whether DCInside autolinks a link containing Hangul all the way through has not been verified yet.
 
 #### Design notes: addresses and transport
 
-- **What:** Links of the form `https://g.yeon.at/?code`, and the rule that switches to `#` for long codes.
-- **Why:** DCInside comments only become clickable links when they start with `https://`. With the code after `?`, GitHub Pages ignores that part and serves the same `index.html`, so every address can open a different photo without any server setup.
-- **How (method and technique):** On load the page reads `location.search`, or `location.hash` if there is no query, to get the code. On copy, if the URL-encoded address exceeds 7,000 bytes, `?` is replaced with `#`.
-- **Mathematical approach:** A Hangul syllable is 3 bytes in UTF-8, and each byte becomes the 3 characters `%XX` in an address, so one syllable costs 9 bytes. A 381-character code is 381 × 9 = 3,429 bytes plus the 19-byte address. The 7,000-byte threshold corresponds to `(7000 − 19) / 9 ≈ 775` syllables.
-- **Engineering approach:** In URI syntax [27] the query (after `?`) is sent to the server, while the fragment (after `#`) stays in the browser. HTTP allows a server to answer 414 to an overly long target [28]. Requests to g.yeon.at returned 200 at 6,000 bytes and 414 at 9,000 bytes (measured 2026-10-26), so the cut-off was set at 7,000 bytes to leave room for the rest of the request line.
-- **Why this choice (alternatives):** Always using `#` would avoid 414 entirely, but `?` is the default form and works fine for short links. So short codes use `?` and long ones `#`.
-- **Value:** 400-character links keep the `?` form, and links of thousands of characters open without errors. The part after `#` never appears in server logs either.
-- **Limitations:** The 414 boundary is a measurement of GitHub Pages (and its CDN) today and may change. How far a messenger's or forum's autolinker extends over non-ASCII characters differs by service.
-- **Sources:** [27], [28], [32]
+The default link has the form `https://g.yeon.at/?code`. DCInside only turns text starting with `https://` into a clickable link, and GitHub Pages ignores everything after `?` and serves the same `index.html`. As a result every address can open a different photo with no server configuration. On load the page reads `location.search`, or `location.hash` when the query is empty, to get the code.
+
+In URI syntax [27] the query after `?` is sent to the server while the fragment after `#` stays in the browser. A Hangul syllable is 3 bytes in UTF-8, and each byte becomes the three characters `%XX` in an address, so one syllable takes 9 bytes. A 381-character code therefore takes 381 × 9 = 3,429 bytes plus the 19-byte address. An HTTP server may answer 414 to an overly long target [28], and direct requests to g.yeon.at were accepted at 6,000 bytes and rejected with 414 at 9,000. To leave room for the rest of the request line, Copy replaces `?` with `#` once the URL-encoded address passes 7,000 bytes, which corresponds to `(7000 − 19) / 9 ≈ 775` syllables.
+
+Using `#` all the time would remove any worry about 414, but `?` is the default form and is enough for short links. So 400-character links keep the `?` form, while links of thousands of characters switch to `#` and open without errors; the part after `#` never reaches server logs either. The 414 boundary is a measurement of how GitHub Pages and its CDN behave today and may change, and how far an autolinker on a forum or messenger extends over non-ASCII characters differs by service [32].
 
 #### Design notes: static hosting
 
-- **What:** Deploying only `index.html` and `CNAME` to GitHub Pages under the custom domain `g.yeon.at`.
-- **Why:** Both compression and decoding happen in the browser, so the server only has to deliver a file.
-- **How (method and technique):** `build.py` in img-dev produces `dist/`, which is copied into the img repository and pushed to `main`.
-- **Engineering approach:** Development material (img-dev) and the deployed copy (img) live in separate repositories so the deploy repository holds only the files the page needs. The `CNAME` file sets the custom domain [32].
-- **Why this choice (alternatives):** A serverless function or own server could enforce the address restriction or collect usage statistics server-side, but would add cost and data-handling burden. Static hosting fits the requirements most simply.
-- **Value:** No running cost, and GitHub Pages is the only point of failure.
-- **Limitations:** With no server code, checks such as the address restriction can only run in the browser.
-- **Sources:** [32]
+Compression and decoding both happen in the browser, so the server only has to deliver a file. Static hosting was therefore chosen: only `index.html` and `CNAME` go to GitHub Pages, under the custom domain `g.yeon.at` [32]. Deployment consists of copying the `dist/` folder that `build.py` produces in img-dev into the img repository.
+
+Development material (img-dev) and the deployed copy (img) live in separate repositories. The deploy repository holds only the files the page needs, while sources, test material and by-products stay in the development repository. A serverless function or an own server could handle the address restriction or usage statistics on the server side, at the price of running costs and the burden of handling data. Static hosting fits the goal most simply: no running cost, and GitHub Pages as the only point of failure. In exchange, checks such as the address restriction can only run inside the browser.
 
 #### Design notes: preprocessing
 
-- **What:** Shrinking the photo to the grid, compositing it on white, and converting it to YCbCr.
-- **Why:** To size the transform to the budget, keeping computation low, and to separate brightness from color so color can be treated more coarsely.
-- **How (method and technique):** On a canvas the photo is halved until it is 2–4 times the target, then drawn once more at grid size. The aspect ratio is stored in 6 bits as `a = round(16 · log2(width/height))`. Color conversion uses JFIF's full-range BT.601 coefficients (`Y = 0.299R + 0.587G + 0.114B`, and so on) [5][6].
-- **Mathematical approach:** By the sampling theorem [36], shrinking by a factor k folds frequencies above `1/(2k)` of the original resolution back into the image (aliasing). The browser's bilinear filter looks at only a 2×2 neighborhood, so one large reduction is effectively point sampling. Halving step by step makes each step close to a 2×2 average, giving the same low-pass effect as a mipmap pyramid [18]. The aspect code has 16 steps per octave, so the ratio error is at most `2^(1/32) ≈ 2.2%`, and ±31 steps reach `2^(31/16) ≈ 3.83:1`.
-- **Engineering approach:** A 64-pixel grid has 64 × 48 = 3,072 coefficients per channel: enough for the few hundred non-zero ones a 400-character budget (about 619 bytes) can hold, while the transform takes under a millisecond. The eye is less sensitive to color contrast than to brightness contrast [17], so separating the color channels lets quantization treat them differently.
-- **Why this choice (alternatives):** Compressing RGB directly spends bits on information repeated in all three channels. Instead of 4:2:0-style spatial chroma subsampling, the color channels use a 1.7× larger step on the same grid. With a whole-image DCT, high-frequency color coefficients end up at zero anyway, so the effect is similar and the code is simpler.
-- **Value:** Photos of any size go through the same path, and no staircase artifacts from downscaling leak into the result.
-- **Limitations:** Canvas downscaling differs slightly between browsers, so the same photo can produce slightly different codes in different browsers. Photos longer than 3.8:1 are squeezed. Transparency is lost to white.
-- **Sources:** [5], [6], [17], [18], [30], [36]
+Preprocessing shrinks the photo to the grid size, composites it on white and converts it to YCbCr. Sizing the transform to the budget keeps computation low, and separating brightness from color lets color be treated more coarsely. Color conversion uses the full-range BT.601 coefficients of JFIF (`Y = 0.299R + 0.587G + 0.114B` and so on) [5][6]. Transparent areas are filled with white.
+
+Downscaling is bound by sampling theory. By the sampling theorem [36], shrinking by a factor k folds frequencies above `1/(2k)` of the original resolution back into the image as aliasing. The browser's bilinear filter only looks at a 2×2 neighborhood, so one large reduction is effectively point sampling and cannot avoid the problem. The photo is therefore halved on a canvas until it is 2–4 times the target and then drawn once more at grid size. Each step comes close to a 2×2 average, giving the same low-pass effect as a mipmap pyramid [18][30].
+
+The aspect ratio is stored in 6 bits as `a = round(16 · log2(width/height))`. With 16 steps per octave the ratio error is at most `2^(1/32) ≈ 2.2%`, and ±31 steps cover up to about 3.83:1. A 64-pixel grid has 64 × 48 = 3,072 coefficients per channel, enough for the few hundred non-zero ones a 400-character budget (about 619 bytes) can hold, while the transform finishes within a millisecond.
+
+Color is kept separate because the eye is less sensitive to color contrast than to brightness contrast [17]. Compressing RGB directly wastes bits on information repeated across the three channels. Instead of reducing color spatially as in 4:2:0, the color channels use a 1.7× larger quantization step on the same grid. With a whole-image DCT the high-frequency color coefficients end up at zero anyway, so the effect is similar and the implementation is simpler.
+
+Photos of any size thus follow the same path, and no staircase artifacts from downscaling leak into the result. Canvas downscaling does differ slightly between browsers, so the same photo can yield slightly different codes in different browsers; photos longer than 3.8:1 are squeezed to that ratio, and transparency is lost to white.
 
 #### Design notes: transform
 
-- **What:** A single 2D DCT-II over the whole grid, and the rule that orders coefficients by frequency.
-- **Why:** Neighboring pixels in natural images are strongly correlated, so after a DCT the energy concentrates in a few low-frequency coefficients. The rest can then be set to zero with little visible loss.
-- **How (method and technique):** The transform is computed separably, horizontally then vertically. Coefficients are sorted by `r = √((u·s/W)² + (v·s/H)²)` with `s = √(W·H)`.
-- **Mathematical approach:** The normalization below makes `A[0,0]` the mean brightness and every other coefficient the amplitude of its cosine wave.
+Neighboring pixels in natural images are strongly correlated. After a DCT the energy gathers in a few low-frequency coefficients, and the rest can be set to zero with little visible loss. The DCT is known to approach the optimal transform (KLT) for a first-order Markov process and to compact energy well [1][2]. This codec applies one 2D DCT-II to the whole grid with the following normalization.
 
-  ```math
-  A[u,v] = \frac{\alpha_u \alpha_v}{WH} \sum_{x=0}^{W-1}\sum_{y=0}^{H-1} f(x,y)\cos\frac{\pi(2x+1)u}{2W}\cos\frac{\pi(2y+1)v}{2H},\quad \alpha_0=1,\ \alpha_{k>0}=2
-  ```
+```math
+A[u,v] = \frac{\alpha_u \alpha_v}{WH} \sum_{x=0}^{W-1}\sum_{y=0}^{H-1} f(x,y)\cos\frac{\pi(2x+1)u}{2W}\cos\frac{\pi(2y+1)v}{2H},\quad \alpha_0=1,\ \alpha_{k>0}=2
+```
 
-  ```math
-  f(x,y) = \sum_{u,v} A[u,v]\cos\frac{\pi(2x+1)u}{2W}\cos\frac{\pi(2y+1)v}{2H}
-  ```
+```math
+f(x,y) = \sum_{u,v} A[u,v]\cos\frac{\pi(2x+1)u}{2W}\cos\frac{\pi(2y+1)v}{2H}
+```
 
-  The DCT is known to approach the optimal transform (KLT) for a first-order Markov process and to compact energy well [1][2]. Cost is `O(W·H·(W+H))`: about 340,000 multiplications for a 64 × 48 grid and about 270 million for 512 × 512.
+Under this normalization `A[0,0]` is the mean brightness and every other coefficient is the amplitude of its cosine wave, so quantization steps can be set directly in brightness units. The transform is computed separably, horizontally then vertically, at a cost of `O(W·H·(W+H))`: about 340,000 multiplications for a 64 × 48 grid and about 270 million for 512 × 512.
 
-- **Engineering approach:** Sorting by r, a frequency normalized to a square, puts the same visible frequency in the same position for wide and tall photos. The sorted order is cached per grid size, and ties on r are broken by the integers v and u, so browsers and Node.js produce the same order.
-- **Why this choice (alternatives):** With JPEG-style 8×8 block DCTs [3][4], a small budget leaves only the DC of each block, producing a checkerboard. The reasons for blocks, computation and local adaptation, matter little at 64–512 grids, so a whole-image transform was chosen. Wavelets can keep edges sharper at the same budget but need a more complex implementation and context model.
-- **Value:** Even with only low frequencies left, the image blurs smoothly without blocks: the right kind of degradation for a tiny budget.
-- **Limitations:** Being global, fine texture in one area competes with the whole picture for the budget. A truncated cosine series overshoots by about 9% near edges (the Gibbs phenomenon) [19], causing ripples. No fast (FFT-based) DCT [24] is used yet, so a 512 grid takes close to a second.
-- **Sources:** [1], [2], [3], [4], [19], [24]
+Coefficients are ordered by increasing `r = √((u·s/W)² + (v·s/H)²)` with `s = √(W·H)`. Using a frequency normalized to a square puts the same visible frequency in the same position for wide and tall photos. The order is cached per grid size, and ties on r are broken by the integers v and u so that browsers and Node.js produce identical orders.
+
+There is a reason for not splitting into 8×8 blocks as JPEG does [3][4]. With a small budget only the DC of each block survives and a checkerboard appears. The original motivations for blocks, computation and local adaptation, matter little at 64–512 grids. Wavelets can preserve edges better at the same budget but make the implementation and context model more complex. A whole-image DCT blurs smoothly without blocks even when only low frequencies remain, which is the right kind of degradation for a tiny budget.
+
+The price is that, being global, fine texture in one area competes with the whole picture for the budget. A truncated cosine series overshoots by about 9% near edges (the Gibbs phenomenon) [19] and leaves ripples. No fast FFT-based DCT [24] is used yet, so a 512 grid takes close to a second.
 
 #### Design notes: quantization
 
-- **What:** The rule that turns real coefficients into integer levels: step size, dead zone, frequency and color weights, and the grid correction.
-- **Why:** Most of the compression is decided here. Discarding less visible components more coarsely makes the result look better at the same length.
-- **How (method and technique):** `step = 0.0002 · 1.06^q · (1 + 0.11·r) · (1.7 for color) · (64/long side in version 1)`, `level = sign(x) · ⌊|x|/step + 0.5 − 0.1⌋`, reconstructed as `level · step`.
-- **Mathematical approach:** DCT AC coefficients are known to follow roughly a Laplacian distribution [15], and for Laplacian sources a uniform quantizer with a widened zero bin (dead zone) is favorable in rate-distortion terms [14]. Here a coefficient becomes zero below `0.6 · step`. q is exponential so that the wide range of `1.06^127 ≈ 1,620`× is divided evenly in 7 bits (6% per step). The version 1 correction follows from this: texture with per-pixel variance σ² has coefficient variance σ² under an orthonormal DCT, and the amplitude coefficients used here are the orthonormal ones times `2/√(WH)`. Their standard deviation therefore shrinks as `1/√(WH)`, which at a fixed aspect ratio is proportional to `1/long side`. Multiplying the step by `64/long side` keeps the same q meaning the same relative precision on every grid.
-- **Engineering approach:** The frequency weight `(1 + 0.11r)` is a straight-line approximation of the contrast sensitivity function [16], and the 1.7× color factor reflects the lower contrast sensitivity for color [17]. Values were chosen by PSNR comparisons on the test photos (item 4 of [Experiments and decisions](https://github.com/Velvitty/img-dev/blob/main/README.en.md#experiments-and-decisions)).
-- **Why this choice (alternatives):** JPEG-style 8×8 quantization tables are tied to the block size and do not fit a whole-image DCT or a changing grid. Pulling reconstruction values toward zero (shrink) is better in theory for Laplacian sources, but 0 measured best and was kept.
-- **Value:** A single q adjusts the rate smoothly, which keeps fitting the character limit simple. The grid correction lets large budgets use all their characters.
-- **Limitations:** The weights were chosen by PSNR on eight test photos and may not be optimal for perceived quality. In version 0, DC uses 6 bits for brightness and 5 for color, so the average color can be off by up to about 2/255 (brightness) and 4/255 (color).
-- **Sources:** [14], [15], [16], [17]
+Most of the compression is decided in quantization: the more coarsely the less visible components are discarded, the better the result looks at the same length. The step size and rounding rule of this codec are:
+
+```math
+\mathrm{step} = 0.0002 \cdot 1.06^{q} \cdot (1 + 0.11\,r) \cdot c_{\mathrm{chroma}} \cdot s_{\mathrm{grid}},\qquad \mathrm{level} = \operatorname{sign}(x)\left\lfloor \frac{|x|}{\mathrm{step}} + 0.5 - 0.1 \right\rfloor
+```
+
+Here `c = 1.7` for color channels and `s = 64/long side` in version 1 (grids of 96 pixels or more); reconstruction is `level · step`.
+
+DCT AC coefficients are known to follow roughly a Laplacian distribution [15], and for Laplacian sources a uniform quantizer with a widened zero bin (dead zone) is favorable in rate-distortion terms [14]. In the rule above a coefficient becomes zero below `0.6 · step`. The frequency weight `1 + 0.11r` is a straight-line approximation of the contrast sensitivity function [16], and the 1.7× color factor reflects the lower sensitivity to color contrast [17]. The values were chosen by comparing PSNR on the test photos (item 4 of [Experiments and decisions](https://github.com/Velvitty/img-dev/blob/main/README.en.md#experiments-and-decisions)). q is exponential so that a range of `1.06^127 ≈ 1,620`× is divided evenly in 7 bits. Each step changes the step size by 6%, so the rate can be adjusted smoothly, which keeps fitting the character limit simple.
+
+The grid factor `s = 64/long side` follows from this relation. Texture with per-pixel variance σ² has coefficient variance σ² under an orthonormal DCT. The amplitude coefficients used here are the orthonormal ones multiplied by `2/√(WH)`, so their standard deviation shrinks as `1/√(WH)`, which at a fixed aspect ratio is proportional to `1/long side`. Multiplying the step by `64/long side` makes the same q mean the same relative precision on every grid. Without this factor fine texture was still rounded to zero on large grids, and the 256-pixel grid stopped at 1,749 characters.
+
+JPEG-style 8×8 quantization tables are tied to the block size and do not suit a whole-image DCT or a changing grid. Pulling reconstruction values toward zero is better in theory for Laplacian sources, but leaving them unshifted measured best. The weights were chosen by PSNR on eight test photos and may differ from the optimum for perceived quality. In version 0 the DC uses 6 bits for brightness and 5 for color, so the average color can be off by up to about 2/255 (brightness) and 4/255 (color); version 1 raises this to 8 bits.
 
 #### Design notes: entropy coding
 
-- **What:** The binary arithmetic coder (range coder) and context model that turn quantized integers into bits.
-- **Why:** Most coefficients are zero, and the chance of being zero varies strongly with frequency and neighbors. Coding with those probabilities is what brings the length close to the entropy.
-- **How (method and technique):** Each coefficient becomes a series of binary decisions: zero or not → sign → greater than 1 → greater than 2 → Exp-Golomb (the same binarization as CABAC [11][12]). Each decision is coded with a probability for its context (channel, frequency band, whether the previous two coefficients were zero). The coder follows the range coder structure of the LZMA SDK (32-bit range, carry handling through a cache byte) [9][10].
-- **Mathematical approach:** An event of probability p costs `−log2 p` bits, and arithmetic coding makes the total length only a few bytes longer than that sum [8]; the spare bytes at the end are removed by the trailing-character trim in [Fitting the character limit](https://github.com/Velvitty/img-dev/blob/main/README.en.md#fitting-the-character-limit). Huffman coding spends at least 1 bit per symbol, even on a "zero" with probability 0.95, where arithmetic coding spends about 0.074 bits. Probabilities are 11-bit integers updated per bit as `p ← p + (2048 − p)/16` on 0 and `p ← p − p/16` on 1: an exponential moving average with an effective memory of about 16 bits, so it adapts quickly within a stream of only a few hundred bytes.
-- **Engineering approach:** The model is kept small at 216 contexts in total. With little data, too many contexts would end before each one has learned anything. The header goes through the same coder at probability 0.5, costing exactly 1 bit per bit without separate bit-packing code.
-- **Why this choice (alternatives):** SHIFT 4 (1/16) beat the LZMA default of 5 (1/32) by 0.04 dB on the validation photos. Starting probabilities trained on the test photos gained only 0.03–0.07 dB, too little for the cost of shipping a table in the code.
-- **Value:** The same information is written far shorter than with fixed-length codes, so a 400-character code can hold hundreds of coefficients.
-- **Limitations:** Signs still cost almost a full bit. Two-dimensional neighbors (the coefficient above) are not used as context, and no stronger model such as context mixing is used. One damaged bit corrupts everything after it.
-- **Sources:** [8], [9], [10], [11], [12], [13]
+Most quantized coefficients are zero, and the chance of a coefficient being zero varies strongly with its frequency and neighbors. Only when that variation is reflected in the probabilities does the length come close to the entropy. The integers are therefore not written out directly but coded with a binary arithmetic coder that uses context-dependent probabilities.
+
+An event of probability p costs `−log2 p` bits, and arithmetic coding makes the total only a few bytes longer than that sum [8]. Huffman coding spends at least one bit per symbol, even on a "zero" with probability 0.95, where arithmetic coding spends about 0.074 bits. The spare bytes left at the end are removed by the trailing-character trim described in [Fitting the character limit](https://github.com/Velvitty/img-dev/blob/main/README.en.md#fitting-the-character-limit).
+
+Each coefficient is split into binary decisions in the order zero or not, sign, greater than 1, greater than 2, and Exp-Golomb, the same binarization as CABAC in H.264 [11][12][13]. Each decision is coded with the probability of a context defined by the channel, the frequency band and whether the previous two coefficients were zero. The coder follows the range coder of the LZMA SDK, with a 32-bit range and carry handling through a cache byte [9][10].
+
+Probabilities are 11-bit integers updated per bit as `p ← p + (2048 − p)/16` on 0 and `p ← p − p/16` on 1. This exponential moving average has an effective memory of about 16 bits, so it adapts quickly even within a stream of a few hundred bytes; on the validation photos 1/16 beat LZMA's default of 1/32 by 0.04 dB. The model is kept small at 216 contexts, because with little data too many contexts would end the stream before each had learned anything. Starting probabilities trained on the test photos gained only 0.03–0.07 dB, too little to justify shipping a table in the code. The header goes through the same coder at probability 0.5 and costs exactly one bit per bit with no separate bit-packing code.
+
+Written this way, the same information takes far fewer bits than with fixed-length codes, so a 400-character code holds hundreds of coefficients. Weaknesses remain: signs still cost almost a full bit, two-dimensional neighbors such as the coefficient above are not used as context, no stronger model such as context mixing is used, and damage in the middle of a stream corrupts everything after it.
 
 #### Design notes: bitstream format
 
-- **What:** The header holding version, grid, aspect ratio, quantizer step, average color and coefficient counts, followed by the coefficients.
-- **Why:** The decoder must rebuild the same grid, coefficient order and step sizes from the code alone.
-- **How (method and technique):** Version 0 has a fixed 62-bit header. Version 1 adds a 3-bit grid index after the version bit, uses 8 bits per DC value and `⌈log2(W·H)⌉` bits per coefficient count.
-- **Mathematical approach:** 62 bits are 1.2% of a 400-character budget (about 5,200 bits). Storing coefficient counts in the header costs a fixed 10–16 bits per channel, instead of an end-of-block question on every coefficient.
-- **Engineering approach:** The 64-pixel grid is still written as version 0, so after extending the format, existing codes and 400-character codes have not changed by a single bit (checked with 16 codes from the test photos). Grid index 7 is left unused as a marker for the next format extension.
-- **Why this choice (alternatives):** A multi-bit version field from the start would have been tidier, but at 400 characters every bit counts, so it started as 1 bit and extensions use spare values inside version 1.
-- **Value:** Overhead stays minimal for small budgets while leaving room to grow the format.
-- **Limitations:** There is no checksum, so truncated or altered codes cannot be reliably detected and may decode into a wrong picture.
-- **Sources:** [11]
+The decoder must rebuild the same grid, coefficient order and step sizes from the code alone. The code therefore starts with a header holding the version, grid, aspect ratio, compression step, average color and coefficient counts, followed by the coefficients.
+
+The version 0 header is 62 bits, 1.2% of a 400-character budget of about 5,200 bits. Storing the coefficient counts in the header instead of an end-of-block marker costs a fixed 10–16 bits per channel, with no per-coefficient question of whether the block ends here [11]. Version 1 adds a 3-bit grid index after the version bit, uses 8 bits per DC value and `⌈log2(W·H)⌉` bits per coefficient count.
+
+Backward compatibility was the main concern when extending the format. The 64-pixel grid is still written as version 0, so codes already in circulation and 400-character codes did not change by a single bit (checked with 16 codes from the test photos). A multi-bit version field from the start would have been tidier, but at 400 characters every bit counts, so it started as one bit. Both values are now in use, so the next extension will use the unused grid index 7 of version 1 as a marker. The remaining weakness is the lack of a checksum: truncated or altered codes cannot be reliably detected and may decode into a wrong picture.
 
 #### Design notes: text packing
 
-- **What:** Writing the bytes as Hangul syllables (13 bits) or base64url characters (6 bits).
-- **Why:** Comments are limited by character count, so each character must carry as many bits as possible.
-- **How (method and technique):** The bit string is cut into 13-bit groups written as `U+AC00 + value`, or 6-bit groups written in the base64url alphabet [25]. When reading, characters outside the ranges are ignored.
-- **Mathematical approach:** Unicode has 11,172 Hangul syllables at `U+AC00–U+D7A3` [29]. Using all of them would give `log2 11172 ≈ 13.447` bits, 3.4% more than 13, but would require treating the whole code as one big number and converting its base, an `O(n²)` computation. Using a power of two, 8,192 characters, lets bits be cut and joined directly.
-- **Engineering approach:** Spare bits in the last character are zero-filled, which matches the decoder's rule of reading missing bytes as zero and makes the trailing-character trim possible.
-- **Why this choice (alternatives):** base83 (BlurHash [33]) or base85 carry slightly more than 6 bits but include address-special characters such as `#`, `%` and `?`. Emoji or Han characters could carry more bits, but display and input are unreliable. Hangul is natural on DCInside and present in most fonts.
-- **Value:** The same 400 characters hold about 2.2 times as much information as ASCII.
-- **Limitations:** Where length is counted in UTF-8 bytes, Hangul carries 4.33 bits per byte, worse than ASCII's 6. A normalization that decomposes syllables into jamo (NFD) [29] breaks the code; the decoder does not currently convert pasted text back to NFC.
-- **Sources:** [25], [29], [33]
+Comments are limited by character count, so each character must carry as many bits as possible. The bytes are joined into a bit string and cut into 13-bit groups written as the Hangul syllable `U+AC00 + value`, or into 6-bit groups written as base64url characters [25]. Characters outside these ranges are ignored when reading.
+
+Unicode has 11,172 Hangul syllables at `U+AC00–U+D7A3` [29]. Using all of them would carry `log2 11172 ≈ 13.447` bits, 3.4% more than 13. That, however, would require treating the whole code as one big number and converting its base, an `O(n²)` computation, whereas with a power of two, 8,192 characters, bits can simply be cut and joined. Spare bits in the last character are zero-filled, which matches the decoder's rule of reading missing bytes as zero and makes the trailing-character trim possible.
+
+Other alphabets were considered. base83 (BlurHash [33]) or base85 carry slightly more than 6 bits but include address-special characters such as `#`, `%` and `?`. Emoji or Han characters could carry more bits, but their display and input are unreliable. Hangul is natural in DCInside comments, present in most fonts, and holds about 2.2 times as much information as ASCII in the same 400 characters.
+
+Where length is counted in UTF-8 bytes, however, Hangul carries 4.33 bits per byte, worse than ASCII's 6. A normalization that decomposes syllables into jamo (NFD) [29] also breaks a code, and the decoder does not currently convert pasted text back to NFC.
 
 #### Design notes: rate control and grid selection
 
-- **What:** How the finest q and the most suitable grid size within the character limit are chosen.
-- **Why:** Only a character count is given, and quality should be as high as possible within it.
-- **How (method and technique):** q is binary-searched from 0 to 127 (7–8 encodes). Trailing characters are removed one at a time while the code still decodes identically. If the 64-pixel grid cannot fill the budget even at q = 0, the photo is re-encoded on the next grid, and the two results are compared by mean squared error against the original at the larger grid size; the better one is kept.
-- **Mathematical approach:** The code length R(q) decreases almost monotonically with q, so binary search finds the smallest q with `R(q) ≤ budget` in about `⌈log2 128⌉ = 7` steps. Whether to spend a given rate on higher resolution with coarser quantization or lower resolution with finer quantization is a classic rate-distortion optimization problem [20]. Here it is solved with a greedy rule, trying a larger grid only once the smaller one is saturated, plus an actual error comparison.
-- **Engineering approach:** A grid that fits at q = 0 skips the binary search, which cut a 7,000-character encode from about 1.8 s to 1.4 s. The trailing-character trim removes the spare bytes the range coder emits at the end, and since it checks by actually decoding, it cannot go wrong.
-- **Why this choice (alternatives):** Encoding every grid and comparing all of them might find better results, but large grids take seconds each. A 768-pixel grid was tried and dropped because 20,000 characters took 16 seconds.
-- **Value:** 400 characters stay as fast as before, while 7,000 characters use 6,968 of them and reach 28.0 dB.
-- **Limitations:** R(q) is not strictly monotonic, so a few characters may be left unused. The greedy rule does not guarantee the optimal grid. Computation runs on the main thread, so the page pauses briefly for large budgets (no Web Worker).
-- **Sources:** [8], [20]
+Only a character limit is given, and within it the quality should be as high as possible. To achieve this, the compression step q and the grid size are chosen together.
+
+The code length R(q) decreases almost monotonically with q, so a binary search over 0–127 finds the smallest q with `R(q) ≤ budget` in about `⌈log2 128⌉ = 7` encodes. Trailing characters are then removed one at a time for as long as the decoded result stays the same. This removes the spare bytes the range coder emits at the end, and since it is checked by actually decoding, it cannot go wrong.
+
+Whether a given rate is better spent on resolution or on quantization precision is a classic rate-distortion optimization problem [20]. It is solved here with a greedy rule. The photo is first encoded on the 64-pixel grid. If even q = 0 leaves characters unused, that grid cannot fill the budget, so the photo is re-encoded on the next grid size. Both results are compared by mean squared error against the original at the larger grid size and the better one is kept; the search stops when the larger grid is worse or no longer reaches q = 0 [8]. A grid that fits at q = 0 skips the binary search, which cut a 7,000-character encode from about 1.8 s to 1.4 s.
+
+Encoding every grid and comparing them all might find better results, but large grids take seconds each; a 768-pixel grid was tried and dropped because 20,000 characters took 16 seconds. The outcome is that 400 characters remain as fast as before, while 7,000 characters use 6,968 of them and reach 28.0 dB. R(q) is not strictly monotonic, so a few characters may be left over; the greedy rule does not guarantee the optimal grid; and the computation runs on the main thread, so the page pauses briefly for large budgets.
 
 #### Design notes: decoding and upscaling
 
-- **What:** Computing the screen-size image directly from the coefficients.
-- **Why:** Building a grid-size image and stretching it adds pixel steps or interpolation blur.
-- **How (method and technique):** Screen coordinates, converted to grid units, are substituted for x and y in the inverse transform and the cosine series is evaluated directly. Rows are computed first, and rows whose coefficients are all zero are skipped.
-- **Mathematical approach:** The inverse DCT formula is a smooth function defined for non-integer x as well, so sampling it at any resolution is band-limited interpolation in the cosine basis. Cost is `O(H·W·outW + rows·outH·outW)`.
-- **Engineering approach:** The same function draws card previews (480px long side) and the View tab (960px). It ends with a YCbCr → RGB conversion clamped to 0–255.
-- **Why this choice (alternatives):** An inverse DCT at grid size followed by canvas image scaling would be faster, but on small grids it shows the blurry cross patterns typical of bilinear interpolation.
-- **Value:** Very little information still produces a pleasant, smoothly blurred image.
-- **Limitations:** Gibbs ripples [19] stay visible when enlarged. `Math.cos` is implementation-approximated by specification [31], so pixel values may differ by about ±1 between browsers.
-- **Sources:** [19], [31]
+Building a grid-size image and then stretching it would add pixel steps or interpolation blur, so the decoder computes the screen-size image directly from the coefficients. Screen coordinates, converted to grid units, are substituted for x and y in the inverse transform and the cosine series is summed as is. The inverse DCT is a smooth function defined for non-integer x as well, so sampling it at any resolution amounts to band-limited interpolation in the cosine basis.
+
+Rows are computed first, and rows whose coefficients are all zero are skipped, for a cost of `O(H·W·outW + rows·outH·outW)`. The same function draws card previews (480px long side) and the View tab (960px), ending with a YCbCr-to-RGB conversion clamped to 0–255. An inverse DCT at grid size followed by canvas scaling would be faster, but on small grids it shows the blurry cross patterns typical of bilinear interpolation.
+
+This approach turns very little information into a pleasant, smoothly blurred image. Gibbs ripples [19] remain visible when enlarged, and because `Math.cos` is implementation-approximated by specification [31], pixel values may differ by about ±1 between browsers.
 
 #### Design notes: page design
 
-- **What:** The screens, code detection, address restriction and remembered settings inside one HTML file.
-- **Why:** The design principle is one HTML file with inline JS and CSS that runs only in the browser, and recipients must be able to open it with no preparation.
-- **How (method and technique):** The codec source is inserted into the page at build time. In pasted text, the longest run of Hangul (at least 4 characters) is taken as the code; failing that, the longest base64url run after the last `?` or `#`. Outside g.yeon.at, localhost, local files and the claude.ai preview, the page draws only a notice and stops.
-- **Engineering approach:** Every localStorage access is wrapped so the page still works with defaults when storage is blocked. If the Clipboard API is refused, copying falls back to selecting the text. Canvas and image handling follow the HTML standard (an animated image draws its default frame) [30].
-- **Why this choice (alternatives):** A framework would shorten the UI code but enlarge the file and add external dependencies. An address restriction is only reliable on a server, but static hosting has no server code.
-- **Value:** Deployment is copying one file, and the page works offline (except fonts).
-- **Limitations:** Code detection is a heuristic, so a Hangul sentence longer than a Hangul code can be mistaken for it. The address restriction is only a deterrent and does not stop someone who edits the source.
-- **Sources:** [27], [30]
+The page follows the principle of one HTML file with all JS and CSS inline, running only in the browser. Recipients must be able to open it with no preparation, and deployment should amount to copying one file. The codec source is inserted into the page at build time, and apart from fonts the page works offline. A framework would shorten the interface code but enlarge the file and add external dependencies.
+
+To find the code in pasted text, the longest run of at least four Hangul characters is chosen, or failing that, the longest base64url run after the last `?` or `#` [27]. The code is read even when other words surround it, but a Hangul sentence longer than the code can be picked by mistake.
+
+Every localStorage access is guarded so the page falls back to defaults when storage is blocked, and if the clipboard API is refused, copying falls back to selecting the text. Canvas and image handling follow the HTML standard, under which an animated image draws its default frame [30].
+
+The address restriction makes the page draw only a notice and stop when it is opened outside g.yeon.at, localhost, local files and the claude.ai preview. A reliable restriction belongs on a server, but static hosting has no server code, so this check remains a deterrent that does not stop someone who edits the source.
 
 #### Design notes: build
 
-- **What:** The script that combines the codec and page in `src/` into the deployable file and the preview.
-- **Why:** Node.js tests and the browser must use the same codec file for the tested code to be the shipped code.
-- **How (method and technique):** It removes only the `module.exports` line from `src/codec.js` and inserts the rest at `/*CODEC*/`.
-- **Engineering approach:** Build outputs (`dist/`, `build/`) are committed too, so the deployable file can be used where no build tools exist.
-- **Why this choice (alternatives):** Bundlers such as webpack are heavy for this scale and add runtime code to the output.
-- **Value:** The build is reproduced by 30 lines of dependency-free Python.
-- **Limitations:** Because outputs are committed, every change must be built and committed together so source and output do not drift.
+Node.js tests and the browser must use the same codec file for the tested code to be the shipped code. `build.py` therefore removes only the `module.exports` line from `src/codec.js` and inserts the rest at the page's `/*CODEC*/` placeholder, so the build is reproduced by 30 lines of dependency-free Python. Bundlers such as webpack are heavy for this scale and add runtime code to the output. Build outputs (`dist/`, `build/`) are committed as well so they can be used where no build tools exist, which in turn means every change is built and committed together so source and output never drift apart.
 
 #### Design notes: evaluation method
 
-- **What:** How image quality is compared numerically (PSNR), plus the test photos and browser tests.
-- **Why:** Choosing parameters, and checking that a change did not break earlier results, requires reproducible numbers.
-- **How (method and technique):** The original box-downscaled to 160×120 is compared with the decoded result drawn at 160×120. Large-grid tests compare at 512×512. Test photos are 8 training and 6 validation images from picsum.photos (Unsplash photos) [35].
-- **Mathematical approach:** The original's high frequencies cannot be transmitted anyway, so comparing near the size the recipient sees is what reveals differences between codecs. PSNR is a logarithm of mean squared error, simple to compute and easy to reproduce.
-- **Engineering approach:** After every codec change, the 400-character results (average PSNR and the code strings) are checked against earlier ones to keep backward compatibility. Browser tests open the real page with Playwright to check making codes, opening links, pasting and the address restriction.
-- **Why this choice (alternatives):** Perceptual metrics such as SSIM track human judgment better [21], but the work started with PSNR because it is simple and easy to interpret.
-- **Value:** Whether a change improved quality or broke existing codes can be checked in seconds.
-- **Limitations:** Fourteen photos is a small sample, and PSNR can disagree with perceived quality [21][22]. The 1200×1200 picture used for the large-limit tests is not included in the repository.
-- **Sources:** [21], [22], [35]
+Choosing parameters, and checking that a change did not break earlier results, requires reproducible numbers. This project compares by PSNR the original box-downscaled to 160×120 with the decoded result drawn at 160×120; large-grid tests compare at 512×512. The original's high frequencies cannot be transmitted anyway, so only a comparison near the size the recipient sees reveals the differences between codecs. PSNR, a logarithm of mean squared error, is simple to compute and easy to reproduce.
+
+The test photos are 8 training and 6 validation images from picsum.photos (Unsplash photos) [35]. After every codec change, the 400-character results, both average PSNR and the code strings, were checked against earlier ones to keep backward compatibility. Browser tests open the real page with Playwright and check making codes, opening links, pasting and the address restriction.
+
+Perceptual metrics such as SSIM track human judgment more closely [21], but PSNR was chosen as a simple and interpretable starting point. Fourteen photos are a small sample, and PSNR can disagree with perceived quality [21][22]. The 1200×1200 picture used for the large-limit tests is not included in the repository.
 
 #### Design notes: the mathematics of PSNR
 
-- **What:** The definition of PSNR and the case-count calculation for the 4-pixel example.
-- **Why:** To answer questions such as "how many dB if identical?" exactly, and to give a scale for reading the numbers in this document.
-- **How (method and technique):** Every channel value of the 4-pixel (red, yellow, blue, green) image is 0 or 255, so if the other image's channel values range over 0–255, each channel's difference d is uniform over 0–255. The distribution of the sum of squared errors is the 12-fold convolution of the distribution of d².
-- **Mathematical approach:** `PSNR = 10·log10(255² / MSE)`, so a 10× larger MSE lowers PSNR by exactly 10 dB, and MSE = 0 gives infinity by definition. One channel off by 1 gives `MSE = 1/12` and `PSNR = 10·log10(12 · 255²) ≈ 58.9 dB`. In the case count, FFT convolution [24] has a relative error of about 10⁻¹⁶, which erased tail probabilities below 10⁻²⁰, and `np.histogram` derives bin values from differences of a cumulative sum, causing cancellation when subtracting tiny numbers from values near 1 [23]. Switching to direct convolution, which only adds positive terms, and `np.bincount` recovered the exact tail up to 58.9 dB.
-- **Engineering approach:** The table of impressions for PSNR values is an empirical guide for this project, not a standard from the literature.
-- **Value:** The meaning of the numbers is conveyed without misunderstanding, and the spurious bar caused by numerical error was corrected.
-- **Limitations:** PSNR can disagree with quality as people perceive it [21][22].
-- **Sources:** [21], [22], [23], [24]
+PSNR is defined as
+
+```math
+\mathrm{PSNR} = 10 \log_{10} \frac{255^2}{\mathrm{MSE}}
+```
+
+so a 10× larger MSE lowers PSNR by exactly 10 dB, and MSE = 0 gives infinity by definition. In the 4-pixel (red, yellow, blue, green) image, one channel off by 1 gives `MSE = 1/12` and therefore `PSNR = 10·log10(12 · 255²) ≈ 58.9 dB`.
+
+The case-count chart starts from one observation. Every channel value of the 4-pixel image is 0 or 255, so if the other image's channel values range over 0–255, each channel's difference d is uniform over 0–255, and the distribution of the sum of squared errors is the 12-fold convolution of the distribution of d². The first version used FFT convolution [24], whose relative error of about 10⁻¹⁶ erased tail probabilities below 10⁻²⁰. In addition, `np.histogram` derives bin values from differences of a cumulative sum, which causes cancellation when tiny numbers are subtracted from values near 1 [23]. Only after switching to direct convolution, which adds positive terms only, and to `np.bincount` was the tail up to 58.9 dB obtained exactly.
+
+The table of impressions for PSNR values is an empirical guide used in this project, not a standard from the literature. PSNR can disagree with quality as people perceive it [21][22].
 
 ### References
 
