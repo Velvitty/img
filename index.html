@@ -288,8 +288,9 @@ a.btn { display: inline-block; text-decoration: none; }
 // Tiny image codec: whole-image DCT in YCbCr, adaptive binary range coder,
 // text output in base64url (6 bits/char) or Hangul syllables (13 bits/char).
 const TinyCodec = (() => {
-  const GRID = 64;            // analysis grid, long side
-  const MAX_Y = 4095, MAX_C = 1023;
+  const GRID = 64;            // analysis grid, long side (version 0)
+  const GRIDS = [64, 96, 128, 192, 256, 384, 512]; // version 1: grid grows with the character budget (3-bit index)
+  const MAX_Y = 4095, MAX_C = 1023;   // version 0 coefficient caps
   const B64 = "ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789-_";
   const HANGUL0 = 0xAC00;
 
@@ -332,9 +333,16 @@ const TinyCodec = (() => {
   const FLAT = new Uint16Array([PONE >> 1]);
 
   // ---- geometry & coefficient order ----
-  function grid(aspect) {
+  function grid(aspect, long = GRID) {
     const r = Math.pow(2, aspect / 16);
-    return r >= 1 ? { W: GRID, H: Math.max(4, Math.round(GRID / r)) } : { W: Math.max(4, Math.round(GRID * r)), H: GRID };
+    return r >= 1 ? { W: long, H: Math.max(4, Math.round(long / r)) } : { W: Math.max(4, Math.round(long * r)), H: long };
+  }
+  // Per-version layout: version 0 is the original fixed 64px format, version 1 adds a grid size.
+  function layout(ver, W, H) {
+    if (ver === 0) return { caps: [MAX_Y, MAX_C, MAX_C], nBits: [12, 10, 10], dcBits: [6, 5, 5], scale: 1 };
+    // Coefficients are amplitudes, which shrink as the grid grows; scale the step to match.
+    const all = W * H - 1, nb = Math.ceil(Math.log2(W * H));
+    return { caps: [all, all, all], nBits: [nb, nb, nb], dcBits: [8, 8, 8], scale: GRID / Math.max(W, H) };
   }
   function aspectCode(w, h) { return Math.max(-31, Math.min(31, Math.round(Math.log2(w / h) * 16))); }
   const orderCache = {};
@@ -353,7 +361,7 @@ const TinyCodec = (() => {
 
   // ---- parameters ----
   const P = { base: 0.0002, growth: 1.06, beta: 0.11, chroma: 1.7, dz: 0.1, shrink: 0 };
-  function stepFor(q, r, ch) { return P.base * Math.pow(P.growth, q) * (1 + P.beta * r) * (ch ? P.chroma : 1); }
+  function stepFor(q, r, ch, scale = 1) { return scale * P.base * Math.pow(P.growth, q) * (1 + P.beta * r) * (ch ? P.chroma : 1); }
 
   // ---- context model ----
   const NB = 10; // frequency bands
@@ -428,13 +436,13 @@ const TinyCodec = (() => {
   }
 
   // ---- quantize & bitstream ----
-  function quantize(coefs, W, H, q) {
+  function quantize(coefs, W, H, q, caps, scale) {
     const ord = order(W, H), res = [];
     for (let ch = 0; ch < 3; ch++) {
-      const max = ch ? MAX_C : MAX_Y, lv = new Int32Array(max);
+      const max = caps[ch], lv = new Int32Array(max);
       let last = 0;
       for (let k = 0; k < Math.min(max, ord.length); k++) {
-        const o = ord[k], x = coefs[ch][o.v * W + o.u], st = stepFor(q, o.r, ch);
+        const o = ord[k], x = coefs[ch][o.v * W + o.u], st = stepFor(q, o.r, ch, scale);
         const a = Math.floor(Math.abs(x) / st + 0.5 - P.dz);
         if (a > 0) { lv[k] = x < 0 ? -a : a; last = k + 1; }
       }
@@ -442,33 +450,37 @@ const TinyCodec = (() => {
     }
     return res;
   }
-  function dcQuant(coefs) {
-    const y = Math.max(0, Math.min(63, Math.round(coefs[0][0] * 63)));
-    const cb = Math.max(0, Math.min(31, Math.round((coefs[1][0] + 0.5) * 31)));
-    const cr = Math.max(0, Math.min(31, Math.round((coefs[2][0] + 0.5) * 31)));
+  function dcQuant(coefs, bits) {
+    const lv = bits.map((b) => (1 << b) - 1);
+    const y = Math.max(0, Math.min(lv[0], Math.round(coefs[0][0] * lv[0])));
+    const cb = Math.max(0, Math.min(lv[1], Math.round((coefs[1][0] + 0.5) * lv[1])));
+    const cr = Math.max(0, Math.min(lv[2], Math.round((coefs[2][0] + 0.5) * lv[2])));
     return [y, cb, cr];
   }
-  function writeStream(aspect, q, dc, ql, W, H) {
-    const e = new Enc(), io = encIO(e), m = newModel(), ord = order(W, H);
-    e.raw(0, 1);                 // version
-    e.raw(aspect + 32, 6);
-    e.raw(q, 7);
-    e.raw(dc[0], 6); e.raw(dc[1], 5); e.raw(dc[2], 5);
-    e.raw(ql[0].n, 12); e.raw(ql[1].n, 10); e.raw(ql[2].n, 10);
-    for (let ch = 0; ch < 3; ch++) codeLevels(io, true, m, ch, ql[ch].lv, ord, ql[ch].n);
+  // s: { ver, g, aspect, q, dc, ql, W, H }
+  function writeStream(s) {
+    const e = new Enc(), io = encIO(e), m = newModel(), ord = order(s.W, s.H), L = layout(s.ver, s.W, s.H);
+    e.raw(s.ver, 1);
+    if (s.ver === 1) e.raw(s.g, 3);
+    e.raw(s.aspect + 32, 6);
+    e.raw(s.q, 7);
+    for (let ch = 0; ch < 3; ch++) e.raw(s.dc[ch], L.dcBits[ch]);
+    for (let ch = 0; ch < 3; ch++) e.raw(s.ql[ch].n, L.nBits[ch]);
+    for (let ch = 0; ch < 3; ch++) codeLevels(io, true, m, ch, s.ql[ch].lv, ord, s.ql[ch].n);
     return e.finish();
   }
   function readStream(bytes) {
     const d = new Dec(bytes), io = decIO(d), m = newModel();
     const ver = d.raw(1);
-    if (ver !== 0) throw new Error("bad version");
+    const g = ver === 1 ? d.raw(3) : 0;
+    if (g >= GRIDS.length) throw new Error("corrupt");
     const aspect = d.raw(6) - 32, q = d.raw(7);
-    const dc = [d.raw(6), d.raw(5), d.raw(5)];
-    const ns = [d.raw(12), d.raw(10), d.raw(10)];
-    const { W, H } = grid(aspect), ord = order(W, H);
-    if (ns[0] > Math.min(MAX_Y, ord.length) || ns[1] > Math.min(MAX_C, ord.length) || ns[2] > Math.min(MAX_C, ord.length)) throw new Error("corrupt");
-    const ql = ns.map((n, ch) => { const lv = new Int32Array(ch ? MAX_C : MAX_Y); codeLevels(io, false, m, ch, lv, ord, n); return { lv, n }; });
-    return { aspect, q, dc, ql, W, H };
+    const { W, H } = grid(aspect, GRIDS[g]), ord = order(W, H), L = layout(ver, W, H);
+    const dc = L.dcBits.map((b) => d.raw(b));
+    const ns = L.nBits.map((b) => d.raw(b));
+    if (ns.some((n, ch) => n > Math.min(L.caps[ch], ord.length))) throw new Error("corrupt");
+    const ql = ns.map((n, ch) => { const lv = new Int32Array(L.caps[ch]); codeLevels(io, false, m, ch, lv, ord, n); return { lv, n }; });
+    return { ver, g, aspect, q, dc, ql, W, H };
   }
 
   // ---- text packing ----
@@ -496,7 +508,7 @@ const TinyCodec = (() => {
     return out;
   }
   function sameLevels(a, b) {
-    if (a.aspect !== b.aspect || a.q !== b.q || a.dc.join() !== b.dc.join()) return false;
+    if (a.ver !== b.ver || a.g !== b.g || a.aspect !== b.aspect || a.q !== b.q || a.dc.join() !== b.dc.join()) return false;
     for (let ch = 0; ch < 3; ch++) {
       if (a.ql[ch].n !== b.ql[ch].n) return false;
       for (let k = 0; k < a.ql[ch].n; k++) if (a.ql[ch].lv[k] !== b.ql[ch].lv[k]) return false;
@@ -517,41 +529,67 @@ const TinyCodec = (() => {
   }
 
   // ---- public API ----
-  // rgba: pixels at grid(aspect) size. Finds the finest quantizer whose text fits maxChars.
-  function encode(rgba, aspect, maxChars, mode) {
-    const { W, H } = grid(aspect), coefs = analyze(rgba, W, H), dc = dcQuant(coefs);
-    let best = null;
-    let lo = 0, hi = 127;
+  // Finest quantizer whose text fits maxChars, at grid size GRIDS[g].
+  function encodeAt(px, aspect, g, maxChars, mode) {
+    const { W, H } = grid(aspect, GRIDS[g]), ver = g === 0 ? 0 : 1, L = layout(ver, W, H);
+    const coefs = analyze(px, W, H), dc = dcQuant(coefs, L.dcBits);
+    const bpc = mode === "hangul" ? 13 : 6;
+    let best = null, lo = 0, hi = 127;
+    // A budget the grid cannot fill fits at q = 0; check that first to skip the search.
+    const fine = { ver, g, aspect, q: 0, dc, ql: quantize(coefs, W, H, 0, L.caps, L.scale), W, H };
+    const fineBytes = writeStream(fine);
+    if (Math.ceil(fineBytes.length * 8 / bpc) <= maxChars) return { text: pack(fineBytes, mode, fine), q: 0, grid: GRIDS[g] };
     while (lo <= hi) {
       const q = (lo + hi) >> 1;
-      const ql = quantize(coefs, W, H, q);
-      const bytes = writeStream(aspect, q, dc, ql, W, H);
+      const s = { ver, g, aspect, q, dc, ql: quantize(coefs, W, H, q, L.caps, L.scale), W, H };
+      const bytes = writeStream(s);
       // cheap estimate first, exact pack only when near the limit
-      const est = Math.ceil(bytes.length * 8 / (mode === "hangul" ? 13 : 6));
-      let text = null;
-      if (est <= maxChars + 2) text = pack(bytes, mode, { aspect, q, dc, ql });
-      if (text && text.length <= maxChars) { best = { text, q }; hi = q - 1; }
+      const text = Math.ceil(bytes.length * 8 / bpc) <= maxChars + 2 ? pack(bytes, mode, s) : null;
+      if (text && text.length <= maxChars) { best = { text, q, grid: GRIDS[g] }; hi = q - 1; }
       else lo = q + 1;
     }
     if (!best) {
-      const ql = quantize(coefs, W, H, 127);
-      ql.forEach((c) => (c.n = 0));
-      const bytes = writeStream(aspect, 127, dc, ql, W, H);
-      best = { text: pack(bytes, mode, { aspect, q: 127, dc, ql }), q: 127 };
+      const s = { ver, g, aspect, q: 127, dc, ql: quantize(coefs, W, H, 127, L.caps, L.scale), W, H };
+      s.ql.forEach((c) => (c.n = 0));
+      best = { text: pack(writeStream(s), mode, s), q: 127, grid: GRIDS[g] };
+    }
+    return best;
+  }
+  // Mean squared error of a code against reference pixels at W x H.
+  function errorAt(text, px, W, H) {
+    const out = render(decode(text), W, H);
+    let se = 0;
+    for (let i = 0; i < W * H * 4; i++) if ((i & 3) !== 3) { const d = out[i] - px[i]; se += d * d; }
+    return se / (W * H * 3);
+  }
+  // source: pixels at the 64px grid, or a function (W, H) => pixels so larger grids can be tried.
+  // While the finest quantizer still fits (q = 0), the budget is larger than the grid can use,
+  // so the next grid size is tried and kept if it is closer to the original.
+  function encode(source, aspect, maxChars, mode, opts = {}) {
+    const get = typeof source === "function" ? source : null;
+    let best = encodeAt(get ? get(...Object.values(grid(aspect))) : source, aspect, 0, maxChars, mode);
+    if (!get) return best;
+    const maxLong = opts.maxLong || Infinity;
+    for (let g = 1; g < GRIDS.length && best.q === 0 && GRIDS[g] <= Math.max(GRID, maxLong); g++) {
+      const { W, H } = grid(aspect, GRIDS[g]), px = get(W, H);
+      const next = encodeAt(px, aspect, g, maxChars, mode);
+      if (errorAt(next.text, px, W, H) >= errorAt(best.text, px, W, H)) break;
+      best = next;
     }
     return best;
   }
   function decode(text) {
     const s = readStream(textToBytes(text));
-    const { W, H } = s, ord = order(W, H);
+    const { W, H } = s, ord = order(W, H), L = layout(s.ver, W, H);
+    const dl = L.dcBits.map((b) => (1 << b) - 1);
     const coefs = [0, 1, 2].map(() => new Float64Array(W * H));
-    coefs[0][0] = s.dc[0] / 63; coefs[1][0] = s.dc[1] / 31 - 0.5; coefs[2][0] = s.dc[2] / 31 - 0.5;
+    coefs[0][0] = s.dc[0] / dl[0]; coefs[1][0] = s.dc[1] / dl[1] - 0.5; coefs[2][0] = s.dc[2] / dl[2] - 0.5;
     for (let ch = 0; ch < 3; ch++) for (let k = 0; k < s.ql[ch].n; k++) {
       const l = s.ql[ch].lv[k]; if (!l) continue;
-      const o = ord[k], st = stepFor(s.q, o.r, ch);
+      const o = ord[k], st = stepFor(s.q, o.r, ch, L.scale);
       coefs[ch][o.v * W + o.u] = Math.sign(l) * (Math.abs(l) - P.shrink) * st;
     }
-    return { W, H, coefs, q: s.q, aspect: s.aspect };
+    return { W, H, coefs, q: s.q, aspect: s.aspect, grid: GRIDS[s.g] };
   }
   // Render decoded image at outW x outH by evaluating the cosine series (smooth upscaling).
   function render(dec, outW, outH) {
@@ -579,7 +617,7 @@ const TinyCodec = (() => {
     }
     return out;
   }
-  return { grid, aspectCode, encode, decode, render, P };
+  return { grid, aspectCode, encode, decode, render, P, GRIDS };
 })();
 
 </script>
@@ -688,7 +726,12 @@ function toGrid(img, W, H) {
 
 function budget() { return Math.max(10, mk.limit - mk.base.length); }
 function codecMode() { return mk.fmt; }
-function shareText(code) { return mk.base + code; }
+// GitHub Pages rejects request lines over about 8 KB (414), and a Hangul syllable becomes 9 bytes
+// in the URL. Long codes therefore go after '#', which the browser never sends to the server.
+function shareText(code) {
+  const base = /\?$/.test(mk.base) && encodeURI(mk.base + code).length > 7000 ? mk.base.slice(0, -1) + "#" : mk.base;
+  return base + code;
+}
 
 function drawDecoded(canvas, code, longSide) {
   const dec = TinyCodec.decode(code);
@@ -701,11 +744,13 @@ function drawDecoded(canvas, code, longSide) {
 }
 
 function encodeItem(item) {
-  const a = TinyCodec.aspectCode(item.img.naturalWidth, item.img.naturalHeight);
-  const { W, H } = TinyCodec.grid(a);
-  if (!item.grid || item.grid.a !== a) item.grid = { a, px: toGrid(item.img, W, H) };
-  const r = TinyCodec.encode(item.grid.px, a, budget(), codecMode());
-  item.result = { code: r.text, q: r.q, text: shareText(r.text) };
+  const { naturalWidth: w, naturalHeight: h } = item.img;
+  const a = TinyCodec.aspectCode(w, h);
+  // Downscaled pixels per grid size; larger grids are only tried when the budget allows.
+  item.px = item.px || {};
+  const source = (W, H) => item.px[W + "x" + H] || (item.px[W + "x" + H] = toGrid(item.img, W, H));
+  const r = TinyCodec.encode(source, a, budget(), codecMode(), { maxLong: Math.max(w, h) });
+  item.result = { code: r.text, q: r.q, grid: r.grid, text: shareText(r.text) };
 }
 
 function renderItem(item) {
@@ -717,6 +762,7 @@ function renderItem(item) {
     `<span>원본 ${fmtBytes(item.size)}</span>` +
     `<span>코드 <b>${r.code.length}자</b></span>` +
     `<span class="${fits ? "ok" : ""}">전체 ${len}/${mk.limit}자</span>` +
+    `<span>격자 ${r.grid}px</span>` +
     `<span>압축 단계 ${r.q}</span>`;
   el.querySelector("textarea").value = r.text;
 }
@@ -829,7 +875,7 @@ function viewCode() {
   try {
     const dec = drawDecoded(cv, code, 960);
     cv.hidden = false; $("view-empty").hidden = true;
-    $("view-stats").innerHTML = `<span>코드 <b>${code.length}자</b></span><span>${/[가-쯿]/.test(code) ? "한글 코드" : "영문 코드"}</span><span>압축 단계 ${dec.q}</span>`;
+    $("view-stats").innerHTML = `<span>코드 <b>${code.length}자</b></span><span>${/[가-쯿]/.test(code) ? "한글 코드" : "영문 코드"}</span><span>격자 ${dec.grid}px</span><span>압축 단계 ${dec.q}</span>`;
   } catch (_) {
     cv.hidden = true; $("view-empty").hidden = false;
     $("view-empty").textContent = "이 글자로는 사진을 만들 수 없습니다. 코드가 잘리지 않았는지, 이 페이지에서 만든 코드인지 확인하세요.";

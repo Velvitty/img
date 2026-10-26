@@ -26,7 +26,7 @@ Funcionan tanto `https://g.yeon.at/?código` como `https://g.yeon.at/index.html?
 
 ## Cómo funciona
 
-1. La foto se reduce a una cuadrícula de 64 píxeles en el lado largo y se convierte a YCbCr.
+1. La foto se reduce a una cuadrícula de 64 píxeles en el lado largo y se convierte a YCbCr. Con un presupuesto de caracteres amplio, la cuadrícula crece a 96–512 píxeles.
 2. Se aplica una DCT 2D a toda la imagen y los coeficientes se ordenan de frecuencia baja a alta.
 3. Las frecuencias altas y los canales de color (crominancia) se cuantizan de forma más gruesa.
 4. Los niveles se comprimen con un codificador aritmético binario adaptativo al contexto (un range coder al estilo de LZMA).
@@ -35,7 +35,7 @@ Funcionan tanto `https://g.yeon.at/?código` como `https://g.yeon.at/index.html?
 
 ## Pestaña de enlace JPG data
 
-Donde el límite es grande (YouTube y Reddit permiten 10 000 caracteres), un JPG normal como enlace `data:` es más nítido. Solo la cabecera de un JPG ocupa varios cientos de caracteres, así que nunca cabe en 400.
+Donde los enlaces `data:` se muestran directamente como imágenes (sitios que admiten imágenes en HTML o Markdown), se puede usar un JPG normal como enlace `data:`. Con el mismo número de caracteres, el código de esta página es más nítido (una imagen de 1200×1200 en 7000 caracteres: JPG 25,6 dB, código hangul 28,0 dB). Solo la cabecera de un JPG ocupa varios cientos de caracteres, así que nunca cabe en 400.
 
 ## Notas
 
@@ -86,6 +86,7 @@ La página tiene tres pestañas.
    | 코드 (Código) | Caracteres que contienen la foto (sin la dirección) |
    | 전체 (Total) | Caracteres con la dirección, frente al límite. En verde si está dentro del límite. |
    | 압축 단계 (Paso) | 0–127. Cuanto más bajo, más fina la compresión. |
+   | 격자 (Cuadrícula) | Tamaño con el que se guardó la foto: 64 px con 400 caracteres, mayor con más caracteres (hasta 512 px). |
 
 4. Hay tres botones.
    - **복사 (Copiar):** copia la dirección y el código en una sola línea. Donde copiar está bloqueado, el texto queda seleccionado para pulsar Ctrl/⌘+C.
@@ -129,7 +130,7 @@ El resultado se puede copiar como enlace, como etiqueta `<img>` o en Markdown.
 - **Código ASCII:** solo `A–Z a–z 0–9 - _`. Úsalo donde no se admita hangul o donde la longitud se cuente en bytes.
 - **Por qué `https://`:** los comentarios de DCInside solo se convierten en enlaces pulsables cuando empiezan por `https://`.
 - **Hangul en la dirección:** la barra de direcciones muestra hangul, pero el navegador envía cada sílaba como 9 caracteres, por ejemplo `%EB%97%88`. 381 sílabas suman unos 3,4 KB, muy por debajo de los límites de longitud de URL.
-- **Forma con `#`:** `https://g.yeon.at/#código` también funciona.
+- **Forma con `#`:** `https://g.yeon.at/#código` también funciona. Cuando el código es tan largo que la dirección pasaría de unos 7 KB (códigos hangul de unos 770 caracteres o más), Copiar usa `#` en lugar de `?` automáticamente. Todo lo que va después de `?` se envía al servidor, y GitHub Pages rechaza direcciones de más de 8 KB (error 414).
 
 ### Calidad y número de caracteres
 
@@ -153,7 +154,7 @@ Algunas fotos funcionan claramente mejor que otras.
 - **Funcionan mal:** fotos cubiertas de textura fina, como vetas de madera, hierba o roca. La textura consume los caracteres y el resultado sigue borroso.
 - **Recorta antes:** dejar solo la parte que quieres mostrar la hace mucho más nítida con la misma longitud.
 - **Texto:** con 400 caracteres no se puede leer texto.
-- **Subir el límite:** da un resultado más nítido, pero donde se permiten 1000 caracteres o más es mejor la pestaña de enlace JPG data.
+- **Subir el límite:** la cuadrícula que guarda la foto crece y el resultado es más nítido. Medido a 512×512 con una imagen de 1200×1200: 400 caracteres dieron una cuadrícula de 64 px y 21,6 dB; 1367, 96 px y 24,0 dB; 4000, 192 px y 26,6 dB; y 7000, 384 px y 28,0 dB. La cuadrícula llega como máximo a 512 px, así que por encima de unos 10 000 caracteres apenas mejora.
 
 ### Privacidad y requisitos
 
@@ -174,25 +175,26 @@ Esta página solo funciona en `g.yeon.at`.
 ### Funcionamiento interno
 
 ```
-foto → cuadrícula de 64 píxeles → YCbCr → DCT 2D de toda la imagen → cuantización → codificación aritmética → texto hangul o ASCII
+foto → cuadrícula de 64–512 píxeles → YCbCr → DCT 2D de toda la imagen → cuantización → codificación aritmética → texto hangul o ASCII
 ```
 
-1. **Reducir:** la foto se reduce a una cuadrícula con 64 píxeles en el lado largo. Se divide a la mitad varias veces para evitar bordes dentados, y las zonas transparentes se rellenan de blanco.
+1. **Reducir:** la foto se reduce a una cuadrícula con 64 píxeles en el lado largo. Si el presupuesto supera lo que caben 64 píxeles, se prueban por turnos cuadrículas de 96, 128, 192, 256, 384 y 512 píxeles y se queda la que más se parece al original. Se divide a la mitad varias veces para evitar bordes dentados, y las zonas transparentes se rellenan de blanco.
 2. **Separar colores:** un canal de brillo (Y) y dos de diferencia de color (Cb, Cr). El ojo es más sensible al brillo, así que el color se trata de forma más gruesa.
 3. **Frecuencias:** en lugar de los bloques 8×8 de JPEG, una sola DCT cubre toda la imagen. No hay bordes de bloque, y primero se guardan las frecuencias bajas (las formas grandes).
 4. **Cuantización:** las frecuencias altas y los canales de color se redondean de forma más gruesa. El paso de compresión (0–127) fija el intervalo de redondeo.
 5. **Codificación aritmética:** cada valor se divide en preguntas como «¿es cero?» y «¿es mayor que 1?», y se comprime con probabilidades que se adaptan a lo anterior (un range coder al estilo de LZMA).
 6. **Escribir como texto:** los bytes se escriben de 13 en 13 bits como sílabas hangul, o de 6 en 6 bits como ASCII.
 7. **Ajustar al límite:** una búsqueda binaria encuentra el paso de compresión más fino que cabe. Después se quitan caracteres finales mientras el código se siga decodificando igual.
-8. **Decodificar:** el navegador de quien lo recibe suma las ondas coseno directamente a la resolución de la pantalla. Como no estira una imagen de 64 píxeles, la foto se difumina con suavidad a cualquier tamaño, sin escalones de píxeles.
+8. **Decodificar:** el navegador de quien lo recibe suma las ondas coseno directamente a la resolución de la pantalla. Como no estira una imagen del tamaño de la cuadrícula, la foto se difumina con suavidad a cualquier tamaño, sin escalones de píxeles.
 
-Los primeros 62 bits de un código (unos 5 caracteres hangul) guardan la versión, la proporción, el paso de compresión, el color medio y el número de coeficientes. El formato a nivel de bits y los parámetros están en la [documentación detallada de img-dev](https://github.com/Velvitty/img-dev/blob/main/README.es.md#diseño-del-códec).
+El comienzo de un código (62 bits, unos 5 caracteres hangul, con la cuadrícula de 64 píxeles) guarda la versión, el tamaño de la cuadrícula, la proporción, el paso de compresión, el color medio y el número de coeficientes. El formato a nivel de bits y los parámetros están en la [documentación detallada de img-dev](https://github.com/Velvitty/img-dev/blob/main/README.es.md#diseño-del-códec).
 
 ### Limitaciones
 
 - **Calidad:** una vista previa borrosa. No se distinguen textos ni texturas finas.
 - **Ondas:** aparecen ondulaciones junto a los bordes de brillo marcados, porque se recortaron frecuencias.
-- **Techo:** la cuadrícula de 64 píxeles es un techo, así que a partir de cierto punto más caracteres no ayudan.
+- **Techo:** la cuadrícula llega como máximo a 512 píxeles, así que por encima de unos 10 000 caracteres apenas mejora.
+- **Tiempo:** con límites de 7000 caracteres o más, la compresión tarda unos segundos.
 - **Proporción:** las fotos más alargadas que unos 3,8:1 se aplastan a esa proporción.
 - **Transparencia:** las zonas transparentes quedan en blanco.
 - **GIF animados:** solo se guarda el primer fotograma.
@@ -238,7 +240,7 @@ No. Un código solo contiene la información de una vista previa borrosa.
 En el mismo navegador, sí. Cada navegador reduce las imágenes de forma un poco distinta, así que el código puede variar ligeramente. Pero un código ya creado se decodifica en la misma foto en cualquier navegador.
 
 **¿Y en sitios que permiten más de 400 caracteres?**
-Subir el límite de caracteres da un resultado más nítido. Con 1000 caracteres o más, es mejor la pestaña de enlace JPG data.
+Subir el límite de caracteres agranda la cuadrícula y da un resultado más nítido (hasta 512 píxeles). Usa la pestaña de enlace JPG data donde los enlaces `data:` se muestran como imágenes.
 
 **¿Por qué el código hangul es más nítido que el ASCII?**
 Porque el mismo número de caracteres guarda unas 2,2 veces más información. Un carácter ASCII es uno entre 64 valores; uno hangul, uno entre 8192.

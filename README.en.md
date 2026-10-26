@@ -26,7 +26,7 @@ Both `https://g.yeon.at/?code` and `https://g.yeon.at/index.html?code` work.
 
 ## How it works
 
-1. The photo is shrunk to a grid with a 64-pixel long side and converted to YCbCr.
+1. The photo is shrunk to a grid with a 64-pixel long side and converted to YCbCr. With a generous character budget the grid grows to 96–512 pixels.
 2. A whole-image 2D DCT is taken and the coefficients are ordered from low to high frequency.
 3. Higher frequencies and the color (chroma) channels are quantized more coarsely.
 4. Levels are compressed with a context-adaptive binary arithmetic coder (an LZMA-style range coder).
@@ -35,7 +35,7 @@ Both `https://g.yeon.at/?code` and `https://g.yeon.at/index.html?code` work.
 
 ## JPG data link tab
 
-Where limits are large (YouTube and Reddit allow 10,000 characters), a regular JPG as a `data:` link is sharper. A JPG header alone is several hundred characters, so it can never fit in 400.
+Where `data:` links are shown directly as images (sites that allow HTML or Markdown images), a regular JPG can be used as a `data:` link. At the same character count, this page's code is sharper (a 1200×1200 picture in 7,000 characters: JPG 25.6 dB, Hangul code 28.0 dB). A JPG header alone is several hundred characters, so it can never fit in 400.
 
 ## Notes
 
@@ -86,6 +86,7 @@ The page has three tabs.
    | 코드 (Code) | Characters holding the photo (without the address) |
    | 전체 (Total) | Characters including the address, against the limit. Green when within the limit. |
    | 압축 단계 (Step) | 0–127. Lower means finer compression. |
+   | 격자 (Grid) | The size the photo was stored at: 64px at 400 characters, larger with more characters (up to 512px). |
 
 4. There are three buttons.
    - **복사 (Copy):** copies the address and code as one line. Where copying is blocked, the text is selected so you can press Ctrl/⌘+C.
@@ -129,7 +130,7 @@ The result can be copied as a link, an `<img>` tag or Markdown.
 - **ASCII code:** only `A–Z a–z 0–9 - _`. Use it where Hangul is not allowed or where length is counted in bytes.
 - **Why `https://`:** DCInside comments only become clickable links when they start with `https://`.
 - **Hangul in the address:** the address bar shows Hangul, but the browser sends each syllable as 9 characters such as `%EB%97%88`. 381 syllables come to about 3.4 KB, well under URL length limits.
-- **`#` form:** `https://g.yeon.at/#code` also opens.
+- **`#` form:** `https://g.yeon.at/#code` also opens. When a code is long enough that the address would pass about 7 KB (Hangul codes of roughly 770 characters or more), Copy uses `#` instead of `?` automatically. Everything after `?` is sent to the server, and GitHub Pages rejects addresses over 8 KB (error 414).
 
 ### Quality and character count
 
@@ -153,7 +154,7 @@ Some photos clearly work better than others.
 - **Works poorly:** photos covered in fine texture, such as wood grain, grass or rock. The texture uses up the characters and the result stays blurry.
 - **Crop first:** keeping only the part you want to show makes it much sharper at the same length.
 - **Text:** text cannot be read at 400 characters.
-- **Raising the limit:** gives a sharper result, but where 1,000 or more characters are allowed, the JPG data link tab is better.
+- **Raising the limit:** the grid holding the photo grows, so the result gets sharper. Measured at 512×512 on a 1200×1200 picture: 400 characters gave a 64px grid and 21.6 dB, 1,367 gave 96px and 24.0 dB, 4,000 gave 192px and 26.6 dB, and 7,000 gave 384px and 28.0 dB. The grid tops out at 512px, so beyond about 10,000 characters there is little gain.
 
 ### Privacy and requirements
 
@@ -174,25 +175,26 @@ This page only works on `g.yeon.at`.
 ### Under the hood
 
 ```
-photo → 64-pixel grid → YCbCr → whole-image 2D DCT → quantization → arithmetic coding → Hangul or ASCII text
+photo → 64–512-pixel grid → YCbCr → whole-image 2D DCT → quantization → arithmetic coding → Hangul or ASCII text
 ```
 
-1. **Shrink:** the photo is reduced to a grid with a 64-pixel long side. It is halved several times to avoid jagged edges, and transparent areas are filled with white.
+1. **Shrink:** the photo is reduced to a grid with a 64-pixel long side. If the budget is more than 64 pixels can use, grids of 96, 128, 192, 256, 384 and 512 pixels are tried in turn, keeping whichever is closer to the original. It is halved several times to avoid jagged edges, and transparent areas are filled with white.
 2. **Split colors:** one brightness channel (Y) and two color-difference channels (Cb, Cr). The eye is more sensitive to brightness, so color is handled more coarsely.
 3. **Frequencies:** instead of JPEG's 8×8 blocks, one DCT covers the whole image. There are no block edges, and low frequencies (large shapes) are stored first.
 4. **Quantization:** higher frequencies and color channels are rounded more coarsely. The compression step (0–127) sets the rounding interval.
 5. **Arithmetic coding:** each value is split into questions such as "is it zero?" and "is it greater than 1?", and compressed with probabilities that adapt to what came before (an LZMA-style range coder).
 6. **Write as text:** bytes are written 13 bits at a time as Hangul syllables, or 6 bits at a time as ASCII.
 7. **Fit the limit:** a binary search finds the finest compression step that fits. Then trailing characters are removed for as long as the code still decodes identically.
-8. **Decode:** the recipient's browser adds up the cosine waves directly at screen resolution. Because it does not stretch a 64-pixel image, the photo blurs smoothly at any size with no pixel steps.
+8. **Decode:** the recipient's browser adds up the cosine waves directly at screen resolution. Because it does not stretch a grid-sized image, the photo blurs smoothly at any size with no pixel steps.
 
-The first 62 bits of a code (about 5 Hangul characters) hold the version, aspect ratio, compression step, average color and coefficient counts. The bit-level format and parameters are in [img-dev's detailed documentation](https://github.com/Velvitty/img-dev/blob/main/README.en.md#codec-design).
+The start of a code (62 bits, about 5 Hangul characters, for the 64-pixel grid) holds the version, grid size, aspect ratio, compression step, average color and coefficient counts. The bit-level format and parameters are in [img-dev's detailed documentation](https://github.com/Velvitty/img-dev/blob/main/README.en.md#codec-design).
 
 ### Limitations
 
 - **Quality:** a blurry preview. Text and fine texture cannot be made out.
 - **Ripples:** wave patterns appear near sharp brightness edges, because frequencies were cut off.
-- **Ceiling:** the 64-pixel grid is a ceiling, so more characters stop helping beyond a point.
+- **Ceiling:** the grid tops out at 512 pixels, so beyond about 10,000 characters more characters barely help.
+- **Time:** with limits of 7,000 characters or more, compression takes a few seconds.
 - **Aspect ratio:** photos longer than about 3.8:1 are squeezed to that ratio.
 - **Transparency:** transparent areas become white.
 - **Animated GIFs:** only the first frame is stored.
@@ -238,7 +240,7 @@ No. A code only holds as much information as a blurry preview.
 In the same browser, yes. Browsers shrink images slightly differently, so codes can differ a little between browsers. But once made, a code decodes to the same photo in any browser.
 
 **What about places that allow more than 400 characters?**
-Raising the character limit gives a sharper result. At 1,000 characters or more, the JPG data link tab is better.
+Raising the character limit grows the grid and gives a sharper result (up to 512 pixels). Use the JPG data link tab where `data:` links are shown as images.
 
 **Why is the Hangul code sharper than the ASCII code?**
 The same number of characters holds about 2.2 times as much information. An ASCII character is one of 64 values; a Hangul character is one of 8,192.
