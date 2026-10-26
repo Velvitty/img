@@ -24,15 +24,6 @@
 | 앞에 붙일 주소 | 기본값은 `https://g.yeon.at/?`(19자)입니다. `https://`로 시작해야 디시 댓글에서 눌리는 링크가 됩니다. 이 길이만큼 사진에 쓸 글자가 줄어듭니다. 비우면 코드만 만듭니다. |
 | 글자 수 제한 | 기본값 400(디시 댓글)입니다. |
 
-## g.yeon.at에 올리기 (GitHub Pages + 사용자 도메인)
-
-1. GitHub에 공개 저장소를 만들고 이 폴더의 `index.html`과 `CNAME`을 올립니다. `CNAME` 파일에는 `g.yeon.at` 한 줄이 들어 있습니다.
-2. 저장소 **Settings → Pages**에서 Source를 `Deploy from a branch`, Branch를 `main` / `/(root)`로 정합니다.
-3. `yeon.at` 도메인의 DNS 관리 화면에서 `CNAME` 레코드를 추가합니다. 이름은 `g`, 값은 `velvitty.github.io`입니다.
-4. DNS가 반영되면 **Settings → Pages**의 Custom domain에 `g.yeon.at`이 표시됩니다. **Enforce HTTPS**를 켭니다.
-
-GitHub Pages는 `?` 뒤의 내용을 무시하고 `index.html`을 보내므로 서버 설정은 따로 필요 없습니다. 페이지가 주소의 `?` 뒤를 읽어 사진으로 풉니다. 한글은 전송할 때 `%EB%…` 꼴로 바뀌지만 페이지가 다시 한글로 되돌립니다.
-
 ## 작동 방식
 
 1. 사진을 긴 변 64픽셀 격자로 줄이고 YCbCr 색공간으로 바꿉니다.

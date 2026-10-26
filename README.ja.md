@@ -24,15 +24,6 @@
 | 前に付けるアドレス | 既定値は `https://g.yeon.at/?`（19字）。`https://` で始めることでコメント内でクリックできるリンクになります。この分だけ写真に使える文字が減ります。空にするとコードだけを出力します。 |
 | 文字数制限 | 既定値は400（DCInsideのコメント）です。 |
 
-## g.yeon.at に置く（GitHub Pages + 独自ドメイン）
-
-1. GitHub に公開リポジトリを作り、このフォルダの `index.html` と `CNAME` をアップロードします。`CNAME` には `g.yeon.at` の1行が入っています。
-2. **Settings → Pages** で Source を `Deploy from a branch`、Branch を `main` / `/(root)` にします。
-3. `yeon.at` の DNS 設定で、名前 `g`、値 `velvitty.github.io` の `CNAME` レコードを追加します。
-4. DNS が反映されると、**Settings → Pages** の Custom domain に `g.yeon.at` と表示されます。**Enforce HTTPS** をオンにします。
-
-GitHub Pages は `?` 以降を無視して `index.html` を返すため、サーバー側の設定は不要です。ページがアドレスの `?` 以降を読み取って写真に復元します。ハングルは送信時に `%EB%…` の形に変わりますが、ページがハングルに戻します。
-
 ## 仕組み
 
 1. 写真を長辺64ピクセルのグリッドに縮小し、YCbCr色空間に変換します。

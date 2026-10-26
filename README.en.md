@@ -24,15 +24,6 @@ Both `https://g.yeon.at/?code` and `https://g.yeon.at/index.html?code` work.
 | Address prefix | Defaults to `https://g.yeon.at/?` (19 characters); the `https://` is what turns it into a clickable link in comments, which is subtracted from the photo's budget. Leave it empty to output only the code. |
 | Character limit | Defaults to 400 (a DCInside comment). |
 
-## Hosting at g.yeon.at (GitHub Pages + custom domain)
-
-1. Create a public GitHub repository and upload `index.html` and `CNAME` from this folder. `CNAME` contains the single line `g.yeon.at`.
-2. In **Settings → Pages**, set Source to `Deploy from a branch` and Branch to `main` / `/(root)`.
-3. In the DNS settings for `yeon.at`, add a `CNAME` record with name `g` and value `velvitty.github.io`.
-4. Once DNS has propagated, **Settings → Pages** shows `g.yeon.at` as the custom domain. Turn on **Enforce HTTPS**.
-
-GitHub Pages ignores everything after `?` and serves `index.html`, so no server setup is needed. The page reads the part after `?` and decodes the photo. Hangul is sent as `%EB%…` escapes, and the page turns it back into Hangul.
-
 ## How it works
 
 1. The photo is shrunk to a grid with a 64-pixel long side and converted to YCbCr.

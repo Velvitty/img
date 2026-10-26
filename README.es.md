@@ -24,15 +24,6 @@ Funcionan tanto `https://g.yeon.at/?código` como `https://g.yeon.at/index.html?
 | Dirección delante | Por defecto `https://g.yeon.at/?` (19 caracteres); el `https://` hace que se convierta en un enlace pulsable en los comentarios, que se descuentan del espacio para la foto. Déjala vacía para generar solo el código. |
 | Límite de caracteres | Por defecto 400 (un comentario de DCInside). |
 
-## Publicar en g.yeon.at (GitHub Pages + dominio propio)
-
-1. Crea un repositorio público en GitHub y sube `index.html` y `CNAME` de esta carpeta. `CNAME` contiene la línea `g.yeon.at`.
-2. En **Settings → Pages**, elige Source `Deploy from a branch` y Branch `main` / `/(root)`.
-3. En la configuración DNS de `yeon.at`, añade un registro `CNAME` con nombre `g` y valor `velvitty.github.io`.
-4. Cuando el DNS se propague, **Settings → Pages** mostrará `g.yeon.at` como dominio propio. Activa **Enforce HTTPS**.
-
-GitHub Pages ignora todo lo que va después de `?` y sirve `index.html`, así que no hace falta configurar nada en el servidor. La página lee lo que va después de `?` y reconstruye la foto. El hangul se envía como `%EB%…` y la página lo convierte de nuevo en hangul.
-
 ## Cómo funciona
 
 1. La foto se reduce a una cuadrícula de 64 píxeles en el lado largo y se convierte a YCbCr.
