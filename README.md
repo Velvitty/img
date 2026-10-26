@@ -333,7 +333,7 @@ JPEG처럼 8×8 블록으로 나누지 않은 데는 이유가 있다[3][4]. 예
 압축률의 대부분은 양자화에서 정해진다. 눈에 덜 띄는 성분을 더 거칠게 버릴수록 같은 글자 수로 더 좋아 보인다. 이 코덱의 양자화 간격과 정수화 규칙은 다음과 같다.
 
 ```math
-\mathrm{step} = 0.0002 \cdot 1.06^{q} \cdot (1 + 0.11\,r) \cdot c_{\mathrm{chroma}} \cdot s_{\mathrm{grid}},\qquad \mathrm{level} = \operatorname{sign}(x)\left\lfloor \frac{|x|}{\mathrm{step}} + 0.5 - 0.1 \right\rfloor
+\mathrm{step} = 0.0002 \cdot 1.06^{q} \cdot (1 + 0.11\,r) \cdot c_{\mathrm{chroma}} \cdot s_{\mathrm{grid}},\qquad \mathrm{level} = \mathrm{sign}(x)\left\lfloor \frac{|x|}{\mathrm{step}} + 0.5 - 0.1 \right\rfloor
 ```
 
 여기서 색 채널은 `c = 1.7`, 버전 1(96픽셀 이상 격자)은 `s = 64/긴 변`이고, 복원은 `level · step`이다.

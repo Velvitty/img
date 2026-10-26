@@ -333,7 +333,7 @@ The price is that, being global, fine texture in one area competes with the whol
 Most of the compression is decided in quantization: the more coarsely the less visible components are discarded, the better the result looks at the same length. The step size and rounding rule of this codec are:
 
 ```math
-\mathrm{step} = 0.0002 \cdot 1.06^{q} \cdot (1 + 0.11\,r) \cdot c_{\mathrm{chroma}} \cdot s_{\mathrm{grid}},\qquad \mathrm{level} = \operatorname{sign}(x)\left\lfloor \frac{|x|}{\mathrm{step}} + 0.5 - 0.1 \right\rfloor
+\mathrm{step} = 0.0002 \cdot 1.06^{q} \cdot (1 + 0.11\,r) \cdot c_{\mathrm{chroma}} \cdot s_{\mathrm{grid}},\qquad \mathrm{level} = \mathrm{sign}(x)\left\lfloor \frac{|x|}{\mathrm{step}} + 0.5 - 0.1 \right\rfloor
 ```
 
 Here `c = 1.7` for color channels and `s = 64/long side` in version 1 (grids of 96 pixels or more); reconstruction is `level · step`.
