@@ -130,6 +130,7 @@ textarea {
   font: inherit; font-size: 0.875rem; border-radius: 6px; padding: 6px 12px; cursor: pointer;
   border: 1px solid var(--line); background: var(--field); color: var(--fg);
 }
+a.btn { display: inline-block; text-decoration: none; }
 .btn.primary { background: var(--accent); border-color: var(--accent); color: var(--accent-fg); font-weight: 700; }
 .btn:hover { border-color: var(--accent); }
 .btn:focus-visible, .seg button:focus-visible, .chip:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
@@ -578,11 +579,33 @@ const TinyCodec = (() => {
     }
     return out;
   }
-  return { grid, aspectCode, encode, decode, render };
+  return { grid, aspectCode, encode, decode, render, P };
 })();
 
 </script>
 <script>
+// Run only on the official site. Local files, localhost and the claude.ai preview stay open for development.
+const HOME = "g.yeon.at";
+const onAllowedHost = (() => {
+  const h = location.hostname;
+  return location.protocol === "file:" || h === HOME || h === "localhost" || h === "127.0.0.1" || /(^|\.)claudeusercontent\.com$/.test(h);
+})();
+if (!onAllowedHost) {
+  // Send the visitor to the official page, keeping any code in the address.
+  const target = "https://" + HOME + "/" + location.search + location.hash;
+  const wrap = document.querySelector(".wrap");
+  wrap.innerHTML = `
+    <header>
+      <h1>400자 짤 압축기</h1>
+      <p>이 페이지는 <b>${HOME}</b>에서만 작동합니다.</p>
+    </header>
+    <p><a class="btn primary" id="go-home"></a></p>`;
+  const a = document.getElementById("go-home");
+  a.href = target;
+  a.textContent = location.search || location.hash ? "g.yeon.at에서 이 사진 보기" : "g.yeon.at으로 가기";
+  throw new Error("400자 짤 압축기: " + HOME + " 밖에서는 작동하지 않습니다.");
+}
+
 const $ = (id) => document.getElementById(id);
 const store = {
   get(k) { try { return localStorage.getItem(k); } catch (_) { return null; } },

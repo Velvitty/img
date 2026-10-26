@@ -53,7 +53,7 @@ Donde el límite es grande (YouTube y Reddit permiten 10 000 caracteres), un JPG
 3. [Formatos de código y enlace](#formatos-de-código-y-enlace)
 4. [Calidad y número de caracteres](#calidad-y-número-de-caracteres)
 5. [Privacidad y requisitos](#privacidad-y-requisitos)
-6. [Alojar tu propia copia](#alojar-tu-propia-copia)
+6. [Abrir en otras direcciones](#abrir-en-otras-direcciones)
 7. [Funcionamiento interno](#funcionamiento-interno)
 8. [Limitaciones](#limitaciones)
 9. [Cómo leer el PSNR](#cómo-leer-el-psnr)
@@ -163,16 +163,13 @@ Algunas fotos funcionan claramente mejor que otras.
 - **Valores recordados:** las letras del código, la dirección delante y la última pestaña se guardan en el almacenamiento del navegador (localStorage). No se guardan fotos ni códigos.
 - **Navegadores:** versiones recientes de Chrome, Edge, Safari y Firefox, también en el móvil.
 
-### Alojar tu propia copia
+### Abrir en otras direcciones
 
-Puedes copiar este repositorio y publicarlo en tu propia dirección.
+Esta página solo funciona en `g.yeon.at`.
 
-1. Haz un fork del repositorio o sube `index.html` a tu propio repositorio.
-2. En **Settings → Pages**, elige la rama `main` / `(root)`.
-3. Para usar tu propio dominio, cambia el contenido de `CNAME` por ese dominio y añade en el DNS un registro CNAME que apunte a `tu-usuario.github.io`. Sin dominio, también sirve `tu-usuario.github.io/repositorio/`; en ese caso borra el archivo `CNAME`.
-4. Al abrirse por http(s), la página rellena la dirección delante con su propia dirección (por ejemplo `https://tu-usuario.github.io/repositorio/?`). Una dirección más larga deja menos caracteres para la foto.
-
-Los códigos creados en cualquier dirección se pueden abrir en cualquier otra, siempre que ambas usen la misma versión de `index.html`.
+- Si el repositorio se copia en otra dirección (por ejemplo `tu-usuario.github.io`), dejan de funcionar la creación y la visualización de fotos, y la página solo muestra un aviso y un botón para ir a g.yeon.at.
+- Si la dirección llevaba un código, el botón lo pasa a g.yeon.at, así que la foto se puede ver allí.
+- Abierta como archivo local o en `localhost`, la página funciona para hacer pruebas.
 
 ### Funcionamiento interno
 

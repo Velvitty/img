@@ -53,7 +53,7 @@ Where limits are large (YouTube and Reddit allow 10,000 characters), a regular J
 3. [Code and link formats](#code-and-link-formats)
 4. [Quality and character count](#quality-and-character-count)
 5. [Privacy and requirements](#privacy-and-requirements)
-6. [Hosting your own copy](#hosting-your-own-copy)
+6. [Opening on other addresses](#opening-on-other-addresses)
 7. [Under the hood](#under-the-hood)
 8. [Limitations](#limitations)
 9. [Reading PSNR](#reading-psnr)
@@ -163,16 +163,13 @@ Some photos clearly work better than others.
 - **Remembered values:** code letters, address prefix and the last tab are kept in browser storage (localStorage). Photos and codes are not stored.
 - **Browsers:** recent Chrome, Edge, Safari and Firefox, including on phones.
 
-### Hosting your own copy
+### Opening on other addresses
 
-You can copy this repository and host it at your own address.
+This page only works on `g.yeon.at`.
 
-1. Fork the repository or upload `index.html` to your own repository.
-2. In **Settings → Pages**, set the branch to `main` / `(root)`.
-3. For your own domain, change the contents of `CNAME` to that domain and add a DNS CNAME record pointing to `your-id.github.io`. Without a domain, `your-id.github.io/repository/` also works; delete the `CNAME` file in that case.
-4. When opened over http(s), the page fills the address prefix with its own address (e.g. `https://your-id.github.io/repository/?`). A longer address leaves fewer characters for the photo.
-
-Codes made on any address decode on any other, as long as both use the same version of `index.html`.
+- If the repository is copied to another address (such as `your-id.github.io`), making and viewing photos both stop, and the page shows only a notice and a button to g.yeon.at.
+- If the address carried a code, the button passes that code on to g.yeon.at, so the photo can still be viewed there.
+- Opened as a local file or on `localhost`, the page works for testing.
 
 ### Under the hood
 
