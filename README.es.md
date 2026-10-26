@@ -274,189 +274,159 @@ Estas notas son las mismas que acompañan a cada parte de la documentación deta
 
 #### Notas de diseño: planteamiento del problema
 
-- **Qué:** Un formato de imagen con pérdida que cabe en una línea de comentario (400 caracteres) y una página de navegador que lo crea y lo decodifica.
-- **Por qué:** Los comentarios de DCInside tienen un límite de 400 caracteres, no admiten adjuntos y no muestran los enlaces `data:` como imágenes. Para enviar una foto, hay que escribir la foto misma como texto.
-- **Cómo (método y técnica):** La cadena clásica de compresión con pérdida, codificación por transformada (DCT) → cuantización → codificación aritmética binaria adaptativa al contexto → conversión a texto, rediseñada para un presupuesto extremadamente pequeño de unos cientos de bytes.
-- **Enfoque matemático:** Un carácter transporta `log2(tamaño del alfabeto)` bits: `log2 64 = 6` en base64url y `log2 8192 = 13` con las 8192 sílabas hangul que se usan. Tras los 19 caracteres de la dirección, 381 caracteres × 13 bits = 4953 bits ≈ 619 bytes es todo lo que recibe la foto. Según el teorema de codificación de fuente de Shannon [7], la longitud media del código no puede bajar de la entropía del modelo, así que hacen falta un modelo que describa las fotos con poca entropía (transformada y modelo de contexto) y un codificador que se acerque a esa entropía (codificación aritmética).
-- **Enfoque de ingeniería:** Debe funcionar desde un único archivo estático sin servidor, y el código debe ser todos los datos (autocontenido). Por eso no hay almacenamiento, ni subidas, ni cuentas.
-- **Por qué así (alternativas):** (1) Los enlaces a un alojamiento de imágenes son cortos, pero dependen de una subida y de la vida del servidor, lo que choca con el requisito de no subir nada. (2) Un enlace JPEG `data:` gasta unos 600 bytes solo en tablas de cuantización y de Huffman, más de 800 caracteres en base64 [3][4][26]. (3) BlurHash [33] y ThumbHash [34] están pensados para marcadores de pocas decenas de caracteres con un número fijo de componentes (BlurHash admite como máximo 9 por eje), así que no pueden aprovechar 400 caracteres. Por eso se creó un códec propio cuya calidad crece con el presupuesto.
-- **Valor:** Sin coste de servidor ni riesgo de privacidad, y mientras se copie el texto, se decodifica en la misma foto en cualquier sitio y para siempre.
-- **Limitaciones:** El techo de información es firme, así que el resultado no pasa de una vista previa borrosa. Todavía no se ha comprobado si DCInside convierte en enlace un texto con hangul hasta el final.
-- **Fuentes:** [3], [4], [7], [26], [33], [34]
+Un comentario de DCInside no puede superar los 400 caracteres, no admite imágenes adjuntas y no muestra los enlaces `data:` como imágenes. En estas condiciones, la única forma de transmitir una foto es escribir la foto misma como texto. Por eso este proyecto diseña a la vez un formato con pérdida que cabe en una línea de comentario y una página de navegador que lo crea y lo decodifica. La compresión sigue la cadena clásica de codificación por transformada (DCT), cuantización, codificación aritmética binaria adaptativa al contexto y conversión a texto, pero cada etapa se ha vuelto a ajustar para un presupuesto de apenas unos cientos de bytes.
+
+El presupuesto empieza por cuánto puede transportar un carácter: `log2(tamaño del alfabeto)` bits. base64url transporta `log2 64 = 6` bits, y las 8192 sílabas hangul que se usan aquí, `log2 8192 = 13` bits. Los 381 caracteres que quedan tras los 19 de la dirección, a 13 bits cada uno, dan 4953 bits, unos 619 bytes, para toda la foto. Según el teorema de codificación de fuente de Shannon [7], la longitud media del código no puede bajar de la entropía del modelo. Una imagen reconocible solo cabe en este presupuesto si hay a la vez un modelo que describa las fotos con poca entropía (una transformada y un modelo de contexto) y un codificador que se acerque a esa entropía (codificación aritmética).
+
+Se sopesaron otras vías. Un enlace a un alojamiento de imágenes es corto, pero depende de una subida y de la vida de un servidor, lo que choca con el objetivo de un código completo sin ningún servidor. Un enlace JPEG `data:` gasta unos 600 bytes solo en tablas de cuantización y de Huffman, más de 800 caracteres en base64 [3][4][26]. BlurHash [33] y ThumbHash [34] están pensados para marcadores de unas pocas decenas de caracteres con un número fijo de componentes (BlurHash admite como máximo 9 por eje), así que no pueden aprovechar 400 caracteres. De ahí un códec propio cuya calidad sigue creciendo al crecer el presupuesto.
+
+El diseño no tiene coste de servidor ni riesgo de privacidad, y mientras se copie el texto, se decodifica en la misma foto en cualquier sitio. A cambio, el techo de información es firme: con 400 caracteres el resultado no pasa de una vista previa borrosa. Todavía no se ha comprobado si DCInside convierte en enlace un texto con hangul hasta el final.
 
 #### Notas de diseño: direcciones y transporte
 
-- **Qué:** Los enlaces de la forma `https://g.yeon.at/?código` y la regla que cambia a `#` con códigos largos.
-- **Por qué:** Los comentarios de DCInside solo se convierten en enlaces pulsables cuando empiezan por `https://`. Con el código después de `?`, GitHub Pages ignora esa parte y sirve el mismo `index.html`, así que cada dirección puede abrir una foto distinta sin configurar el servidor.
-- **Cómo (método y técnica):** Al cargarse, la página lee `location.search`, o `location.hash` si no hay consulta, para obtener el código. Al copiar, si la dirección codificada como URL supera 7000 bytes, `?` se cambia por `#`.
-- **Enfoque matemático:** Una sílaba hangul ocupa 3 bytes en UTF-8, y en una dirección cada byte se convierte en los 3 caracteres `%XX`, así que una sílaba cuesta 9 bytes. Un código de 381 caracteres son 381 × 9 = 3429 bytes más los 19 de la dirección. El umbral de 7000 bytes equivale a `(7000 − 19) / 9 ≈ 775` sílabas.
-- **Enfoque de ingeniería:** En la sintaxis URI [27], la consulta (tras `?`) se envía al servidor, mientras que el fragmento (tras `#`) se queda en el navegador. HTTP permite responder 414 a un destino demasiado largo [28]. Las peticiones a g.yeon.at devolvieron 200 con 6000 bytes y 414 con 9000 (medido el 2026-10-26), así que el corte se puso en 7000 bytes para dejar margen al resto de la línea de petición.
-- **Por qué así (alternativas):** Usar siempre `#` evitaría el 414 por completo, pero `?` es la forma por defecto y basta para los enlaces cortos. Así que los códigos cortos usan `?` y los largos `#`.
-- **Valor:** Los enlaces de 400 caracteres mantienen la forma con `?`, y los de miles de caracteres se abren sin errores. Lo que va después de `#` tampoco aparece en los registros del servidor.
-- **Limitaciones:** El límite del 414 es una medición del comportamiento actual de GitHub Pages (y su CDN) y puede cambiar. Hasta dónde incluye caracteres no ASCII el enlazado automático de cada mensajería o foro depende del servicio.
-- **Fuentes:** [27], [28], [32]
+El enlace por defecto tiene la forma `https://g.yeon.at/?código`. DCInside solo convierte en enlace pulsable el texto que empieza por `https://`, y GitHub Pages ignora todo lo que va después de `?` y sirve el mismo `index.html`. Así, cada dirección puede abrir una foto distinta sin configurar el servidor. Al cargarse, la página lee `location.search`, o `location.hash` si la consulta está vacía, para obtener el código.
+
+En la sintaxis URI [27], la consulta tras `?` se envía al servidor, mientras que el fragmento tras `#` se queda en el navegador. Una sílaba hangul ocupa 3 bytes en UTF-8, y en una dirección cada byte se convierte en los tres caracteres `%XX`, así que una sílaba ocupa 9 bytes. Un código de 381 caracteres ocupa entonces 381 × 9 = 3429 bytes más los 19 de la dirección. Un servidor HTTP puede responder 414 a un destino demasiado largo [28], y las peticiones directas a g.yeon.at se aceptaron con 6000 bytes y se rechazaron con 414 con 9000. Para dejar margen al resto de la línea de petición, Copiar cambia `?` por `#` cuando la dirección codificada como URL pasa de 7000 bytes, lo que equivale a `(7000 − 19) / 9 ≈ 775` sílabas.
+
+Usar siempre `#` eliminaría cualquier preocupación por el 414, pero `?` es la forma por defecto y basta para los enlaces cortos. Por eso los enlaces de 400 caracteres mantienen la forma con `?`, mientras que los de miles de caracteres pasan a `#` y se abren sin errores; lo que va después de `#` tampoco llega a los registros del servidor. El límite del 414 es una medición del comportamiento actual de GitHub Pages y su CDN y puede cambiar, y hasta dónde abarca caracteres no ASCII el enlazado automático de un foro o una mensajería depende del servicio [32].
 
 #### Notas de diseño: alojamiento estático
 
-- **Qué:** Publicar solo `index.html` y `CNAME` en GitHub Pages con el dominio propio `g.yeon.at`.
-- **Por qué:** La compresión y la decodificación ocurren en el navegador, así que el servidor solo tiene que entregar un archivo.
-- **Cómo (método y técnica):** `build.py` en img-dev genera `dist/`, que se copia al repositorio img y se sube a `main`.
-- **Enfoque de ingeniería:** El material de desarrollo (img-dev) y la copia publicada (img) están en repositorios separados, para que el de publicación contenga solo los archivos que necesita la página. El archivo `CNAME` fija el dominio propio [32].
-- **Por qué así (alternativas):** Una función sin servidor o un servidor propio podrían aplicar la restricción de dirección o recoger estadísticas de uso en el servidor, pero añadirían coste y responsabilidad sobre los datos. El alojamiento estático es lo que mejor y más simplemente cumple los requisitos.
-- **Valor:** Sin coste de funcionamiento, y GitHub Pages es el único punto de fallo.
-- **Limitaciones:** Sin código de servidor, comprobaciones como la restricción de dirección solo pueden hacerse en el navegador.
-- **Fuentes:** [32]
+La compresión y la decodificación ocurren en el navegador, así que el servidor solo tiene que entregar un archivo. Por eso se eligió el alojamiento estático: solo `index.html` y `CNAME` van a GitHub Pages, con el dominio propio `g.yeon.at` [32]. Publicar consiste en copiar en el repositorio img la carpeta `dist/` que genera `build.py` en img-dev.
+
+El material de desarrollo (img-dev) y la copia publicada (img) están en repositorios separados. El de publicación contiene solo los archivos que necesita la página, mientras que el código fuente, el material de pruebas y los subproductos quedan en el de desarrollo. Una función sin servidor o un servidor propio podrían ocuparse de la restricción de dirección o de estadísticas de uso en el servidor, a costa de gastos de funcionamiento y de la responsabilidad de tratar datos. El alojamiento estático es lo que mejor y más simplemente cumple el objetivo: sin coste de funcionamiento y con GitHub Pages como único punto de fallo. A cambio, comprobaciones como la restricción de dirección solo pueden hacerse en el navegador.
 
 #### Notas de diseño: preprocesado
 
-- **Qué:** Reducir la foto a la cuadrícula, componerla sobre blanco y convertirla a YCbCr.
-- **Por qué:** Para ajustar el tamaño de la transformada al presupuesto, con poco cálculo, y para separar brillo y color de modo que el color pueda tratarse de forma más gruesa.
-- **Cómo (método y técnica):** En un canvas, la foto se divide a la mitad hasta quedar entre 2 y 4 veces el objetivo y luego se dibuja una vez más al tamaño de la cuadrícula. La proporción se guarda en 6 bits como `a = round(16 · log2(ancho/alto))`. La conversión de color usa los coeficientes BT.601 de rango completo de JFIF (`Y = 0.299R + 0.587G + 0.114B`, etc.) [5][6].
-- **Enfoque matemático:** Según el teorema de muestreo [36], reducir por un factor k pliega dentro de la imagen las frecuencias superiores a `1/(2k)` de la resolución original (aliasing). El filtro bilineal del navegador solo mira un entorno de 2×2, así que una reducción grande de una vez equivale a muestrear puntos. Reducir a la mitad paso a paso hace que cada paso se parezca a una media de 2×2, con el mismo efecto paso bajo que una pirámide de mipmaps [18]. El código de proporción tiene 16 pasos por octava, así que el error de proporción es como mucho `2^(1/32) ≈ 2,2 %`, y ±31 pasos llegan a `2^(31/16) ≈ 3,83:1`.
-- **Enfoque de ingeniería:** Una cuadrícula de 64 píxeles tiene 64 × 48 = 3072 coeficientes por canal: suficientes para los pocos cientos distintos de cero que caben en un presupuesto de 400 caracteres (unos 619 bytes), con una transformada de menos de un milisegundo. El ojo es menos sensible al contraste de color que al de brillo [17], así que separar los canales de color permite tratarlos de forma distinta al cuantizar.
-- **Por qué así (alternativas):** Comprimir en RGB gasta bits en información repetida en los tres canales. En lugar de submuestrear el color en el espacio al estilo 4:2:0, los canales de color usan un paso 1,7 veces mayor en la misma cuadrícula. Con una DCT de toda la imagen, los coeficientes de color de alta frecuencia acaban en cero de todos modos, así que el efecto es parecido y el código, más simple.
-- **Valor:** Fotos de cualquier tamaño siguen el mismo camino, y los escalones de la reducción no se cuelan en el resultado.
-- **Limitaciones:** La reducción en canvas varía un poco entre navegadores, así que la misma foto puede dar códigos algo distintos en navegadores distintos. Las fotos más alargadas que 3,8:1 se aplastan. La transparencia se pierde en blanco.
-- **Fuentes:** [5], [6], [17], [18], [30], [36]
+El preprocesado reduce la foto al tamaño de la cuadrícula, la compone sobre blanco y la convierte a YCbCr. Ajustar la transformada al presupuesto mantiene bajo el cálculo, y separar brillo y color permite tratar el color de forma más gruesa. La conversión de color usa los coeficientes BT.601 de rango completo de JFIF (`Y = 0.299R + 0.587G + 0.114B`, etc.) [5][6]. Las zonas transparentes se rellenan de blanco.
+
+La reducción está sujeta a la teoría del muestreo. Según el teorema de muestreo [36], reducir por un factor k pliega dentro de la imagen, como aliasing, las frecuencias superiores a `1/(2k)` de la resolución original. El filtro bilineal del navegador solo mira un entorno de 2×2 píxeles, así que una reducción grande de una vez equivale a muestrear puntos y no evita el problema. Por eso la foto se divide a la mitad en un canvas hasta quedar entre 2 y 4 veces el objetivo y luego se dibuja una última vez al tamaño de la cuadrícula. Cada paso se acerca a una media de 2×2, con el mismo efecto paso bajo que una pirámide de mipmaps [18][30].
+
+La proporción se guarda en 6 bits como `a = round(16 · log2(ancho/alto))`. Con 16 pasos por octava, el error de proporción es como mucho `2^(1/32) ≈ 2,2 %`, y ±31 pasos cubren hasta unos 3,83:1. Una cuadrícula de 64 píxeles tiene 64 × 48 = 3072 coeficientes por canal, suficientes para los pocos cientos distintos de cero que caben en un presupuesto de 400 caracteres (unos 619 bytes), con una transformada que termina en menos de un milisegundo.
+
+El color se separa porque el ojo es menos sensible al contraste de color que al de brillo [17]. Comprimir en RGB gasta bits en información repetida en los tres canales. En lugar de reducir el color en el espacio al estilo 4:2:0, los canales de color usan un paso de cuantización 1,7 veces mayor en la misma cuadrícula. Con una DCT de toda la imagen, los coeficientes de color de alta frecuencia acaban en cero de todos modos, así que el efecto es parecido y la implementación, más simple.
+
+Así, fotos de cualquier tamaño siguen el mismo camino y los escalones de la reducción no se cuelan en el resultado. La reducción en canvas sí varía un poco entre navegadores, de modo que la misma foto puede dar códigos algo distintos en navegadores distintos; las fotos más alargadas que 3,8:1 se aplastan a esa proporción, y la transparencia se pierde en blanco.
 
 #### Notas de diseño: transformada
 
-- **Qué:** Una única DCT-II 2D sobre toda la cuadrícula y la regla que ordena los coeficientes por frecuencia.
-- **Por qué:** Los píxeles vecinos de una imagen natural están muy correlacionados, así que tras una DCT la energía se concentra en unos pocos coeficientes de baja frecuencia. El resto puede ponerse a cero con poca pérdida visible.
-- **Cómo (método y técnica):** La transformada se calcula de forma separable, primero en horizontal y luego en vertical. Los coeficientes se ordenan por `r = √((u·s/W)² + (v·s/H)²)` con `s = √(W·H)`.
-- **Enfoque matemático:** La normalización siguiente hace que `A[0,0]` sea el brillo medio y que cada otro coeficiente sea la amplitud de su onda coseno.
+Los píxeles vecinos de una imagen natural están muy correlacionados. Tras una DCT, la energía se reúne en unos pocos coeficientes de baja frecuencia, y el resto puede ponerse a cero con poca pérdida visible. Se sabe que la DCT se aproxima a la transformada óptima (KLT) para un proceso de Markov de primer orden y que compacta bien la energía [1][2]. Este códec aplica una única DCT-II 2D a toda la cuadrícula con la normalización siguiente.
 
-  ```math
-  A[u,v] = \frac{\alpha_u \alpha_v}{WH} \sum_{x=0}^{W-1}\sum_{y=0}^{H-1} f(x,y)\cos\frac{\pi(2x+1)u}{2W}\cos\frac{\pi(2y+1)v}{2H},\quad \alpha_0=1,\ \alpha_{k>0}=2
-  ```
+```math
+A[u,v] = \frac{\alpha_u \alpha_v}{WH} \sum_{x=0}^{W-1}\sum_{y=0}^{H-1} f(x,y)\cos\frac{\pi(2x+1)u}{2W}\cos\frac{\pi(2y+1)v}{2H},\quad \alpha_0=1,\ \alpha_{k>0}=2
+```
 
-  ```math
-  f(x,y) = \sum_{u,v} A[u,v]\cos\frac{\pi(2x+1)u}{2W}\cos\frac{\pi(2y+1)v}{2H}
-  ```
+```math
+f(x,y) = \sum_{u,v} A[u,v]\cos\frac{\pi(2x+1)u}{2W}\cos\frac{\pi(2y+1)v}{2H}
+```
 
-  Se sabe que la DCT se aproxima a la transformada óptima (KLT) para un proceso de Markov de primer orden y que compacta bien la energía [1][2]. El coste es `O(W·H·(W+H))`: unas 340 000 multiplicaciones para una cuadrícula de 64 × 48 y unos 270 millones para 512 × 512.
+Con esta normalización, `A[0,0]` es el brillo medio y cada otro coeficiente es la amplitud de su onda coseno, de modo que los pasos de cuantización se fijan directamente en unidades de brillo. La transformada se calcula de forma separable, primero en horizontal y luego en vertical, con un coste de `O(W·H·(W+H))`: unas 340 000 multiplicaciones para una cuadrícula de 64 × 48 y unos 270 millones para 512 × 512.
 
-- **Enfoque de ingeniería:** Ordenar por r, una frecuencia normalizada a un cuadrado, pone la misma frecuencia visible en la misma posición en fotos anchas y altas. El orden se guarda por tamaño de cuadrícula, y los empates en r se resuelven con los enteros v y u, así que navegadores y Node.js obtienen el mismo orden.
-- **Por qué así (alternativas):** Con DCT por bloques de 8×8 al estilo JPEG [3][4], un presupuesto pequeño deja solo el DC de cada bloque y aparece un tablero de ajedrez. Las razones de usar bloques, el cálculo y la adaptación local, pesan poco en cuadrículas de 64–512, así que se eligió una transformada global. Las wavelets pueden conservar mejor los bordes con el mismo presupuesto, pero complican la implementación y el modelo de contexto.
-- **Valor:** Aunque solo queden frecuencias bajas, la imagen se difumina con suavidad y sin bloques: el tipo de degradación adecuado para un presupuesto mínimo.
-- **Limitaciones:** Al ser global, la textura fina de una zona compite por el presupuesto con toda la imagen. Una serie de cosenos truncada sobrepasa en torno a un 9 % cerca de los bordes (fenómeno de Gibbs) [19] y produce ondulaciones. Todavía no se usa una DCT rápida (basada en FFT) [24], así que una cuadrícula de 512 tarda casi un segundo.
-- **Fuentes:** [1], [2], [3], [4], [19], [24]
+Los coeficientes se ordenan por `r = √((u·s/W)² + (v·s/H)²)` creciente, con `s = √(W·H)`. Usar una frecuencia normalizada a un cuadrado pone la misma frecuencia visible en la misma posición en fotos anchas y altas. El orden se guarda por tamaño de cuadrícula, y los empates en r se resuelven con los enteros v y u para que navegadores y Node.js obtengan el mismo orden.
+
+Hay una razón para no dividir en bloques de 8×8 como JPEG [3][4]. Con un presupuesto pequeño solo sobrevive el DC de cada bloque y aparece un tablero de ajedrez. Los motivos originales de los bloques, el cálculo y la adaptación local, pesan poco en cuadrículas de 64–512. Las wavelets pueden conservar mejor los bordes con el mismo presupuesto, pero complican la implementación y el modelo de contexto. Una DCT de toda la imagen se difumina con suavidad y sin bloques aunque solo queden frecuencias bajas, que es el tipo de degradación adecuado para un presupuesto mínimo.
+
+El precio es que, al ser global, la textura fina de una zona compite por el presupuesto con toda la imagen. Una serie de cosenos truncada sobrepasa en torno a un 9 % cerca de los bordes (fenómeno de Gibbs) [19] y deja ondulaciones. Todavía no se usa una DCT rápida basada en FFT [24], así que una cuadrícula de 512 tarda casi un segundo.
 
 #### Notas de diseño: cuantización
 
-- **Qué:** La regla que convierte los coeficientes reales en niveles enteros: tamaño del paso, zona muerta, pesos de frecuencia y color, y la corrección de cuadrícula.
-- **Por qué:** Aquí se decide la mayor parte de la compresión. Descartar con más fuerza lo menos visible hace que el resultado se vea mejor con la misma longitud.
-- **Cómo (método y técnica):** `step = 0.0002 · 1.06^q · (1 + 0.11·r) · (1,7 en color) · (64/lado largo en la versión 1)`, `level = sign(x) · ⌊|x|/step + 0.5 − 0.1⌋`, reconstruido como `level · step`.
-- **Enfoque matemático:** Se sabe que los coeficientes AC de la DCT siguen aproximadamente una distribución de Laplace [15], y para fuentes laplacianas un cuantizador uniforme con el intervalo del cero ensanchado (zona muerta) es favorable en términos de tasa-distorsión [14]. Aquí un coeficiente pasa a cero por debajo de `0.6 · step`. q es exponencial para repartir con 7 bits un rango amplio de `1.06^127 ≈ 1620` veces (6 % por paso). La corrección de la versión 1 sale de esta relación: una textura con varianza por píxel σ² tiene coeficientes de varianza σ² con una DCT ortonormal, y los coeficientes de amplitud usados aquí son los ortonormales multiplicados por `2/√(WH)`. Su desviación típica se reduce entonces como `1/√(WH)`, que con proporción fija es proporcional a `1/lado largo`. Multiplicar el paso por `64/lado largo` hace que el mismo q signifique la misma precisión relativa en cualquier cuadrícula.
-- **Enfoque de ingeniería:** El peso de frecuencia `(1 + 0.11r)` es una aproximación lineal de la función de sensibilidad al contraste [16], y el factor 1,7 del color refleja la menor sensibilidad al contraste cromático [17]. Los valores se eligieron comparando el PSNR en las fotos de prueba (punto 4 de [Experimentos y decisiones](https://github.com/Velvitty/img-dev/blob/main/README.es.md#experimentos-y-decisiones)).
-- **Por qué así (alternativas):** Las tablas de cuantización 8×8 al estilo JPEG están atadas al tamaño de bloque y no encajan con una DCT global ni con una cuadrícula variable. Acercar a cero los valores reconstruidos (shrink) es mejor en teoría para fuentes laplacianas, pero el 0 dio la mejor medida y se mantuvo.
-- **Valor:** Un solo q ajusta la tasa con suavidad, lo que simplifica el ajuste al límite de caracteres. La corrección de cuadrícula permite que los presupuestos grandes usen todos sus caracteres.
-- **Limitaciones:** Los pesos se eligieron por PSNR con ocho fotos de prueba y pueden no ser óptimos para la calidad percibida. En la versión 0, el DC usa 6 bits para el brillo y 5 para el color, así que el color medio puede desviarse hasta unos 2/255 (brillo) y 4/255 (color).
-- **Fuentes:** [14], [15], [16], [17]
+La mayor parte de la compresión se decide en la cuantización: cuanto más se descarta lo menos visible, mejor se ve el resultado con la misma longitud. El paso y la regla de redondeo de este códec son:
+
+```math
+\mathrm{step} = 0.0002 \cdot 1.06^{q} \cdot (1 + 0.11\,r) \cdot c_{\mathrm{chroma}} \cdot s_{\mathrm{grid}},\qquad \mathrm{level} = \mathrm{sign}(x)\left\lfloor \frac{|x|}{\mathrm{step}} + 0.5 - 0.1 \right\rfloor
+```
+
+Aquí `c = 1,7` en los canales de color y `s = 64/lado largo` en la versión 1 (cuadrículas de 96 píxeles o más); la reconstrucción es `level · step`.
+
+Se sabe que los coeficientes AC de la DCT siguen aproximadamente una distribución de Laplace [15], y para fuentes laplacianas un cuantizador uniforme con el intervalo del cero ensanchado (zona muerta) es favorable en términos de tasa-distorsión [14]. En la regla anterior, un coeficiente pasa a cero por debajo de `0.6 · step`. El peso de frecuencia `1 + 0.11r` es una aproximación lineal de la función de sensibilidad al contraste [16], y el factor 1,7 del color refleja la menor sensibilidad al contraste cromático [17]. Los valores se eligieron comparando el PSNR en las fotos de prueba (punto 4 de [Experimentos y decisiones](https://github.com/Velvitty/img-dev/blob/main/README.es.md#experimentos-y-decisiones)). q es exponencial para repartir con 7 bits un rango de `1.06^127 ≈ 1620` veces. Cada paso cambia el tamaño del paso un 6 %, así que la tasa se ajusta con suavidad y el ajuste al límite de caracteres resulta sencillo.
+
+El factor de cuadrícula `s = 64/lado largo` sale de esta relación. Una textura con varianza por píxel σ² tiene coeficientes de varianza σ² con una DCT ortonormal. Los coeficientes de amplitud usados aquí son los ortonormales multiplicados por `2/√(WH)`, así que su desviación típica se reduce como `1/√(WH)`, que con proporción fija es proporcional a `1/lado largo`. Multiplicar el paso por `64/lado largo` hace que el mismo q signifique la misma precisión relativa en cualquier cuadrícula. Sin este factor, la textura fina seguía redondeándose a cero en cuadrículas grandes y la de 256 píxeles no pasaba de 1749 caracteres.
+
+Las tablas de cuantización 8×8 al estilo JPEG están atadas al tamaño de bloque y no encajan con una DCT global ni con una cuadrícula variable. Acercar a cero los valores reconstruidos es mejor en teoría para fuentes laplacianas, pero no desplazarlos dio la mejor medida. Los pesos se eligieron por PSNR con ocho fotos de prueba y pueden diferir del óptimo para la calidad percibida. En la versión 0, el DC usa 6 bits para el brillo y 5 para el color, así que el color medio puede desviarse hasta unos 2/255 (brillo) y 4/255 (color); la versión 1 lo sube a 8 bits.
 
 #### Notas de diseño: codificación entrópica
 
-- **Qué:** El codificador aritmético binario (range coder) y el modelo de contexto que convierten los enteros cuantizados en bits.
-- **Por qué:** La mayoría de los coeficientes son cero, y la probabilidad de serlo cambia mucho según la frecuencia y los vecinos. Codificar con esas probabilidades es lo que acerca la longitud a la entropía.
-- **Cómo (método y técnica):** Cada coeficiente se convierte en una serie de decisiones binarias: cero o no → signo → mayor que 1 → mayor que 2 → Exp-Golomb (la misma binarización que CABAC [11][12]). Cada decisión se codifica con la probabilidad de su contexto (canal, banda de frecuencia, si los dos coeficientes anteriores eran cero). El codificador sigue la estructura del range coder del SDK de LZMA (rango de 32 bits, acarreo mediante un byte de caché) [9][10].
-- **Enfoque matemático:** Un suceso de probabilidad p cuesta `−log2 p` bits, y la codificación aritmética deja la longitud total solo unos bytes por encima de esa suma [8]; los bytes sobrantes del final se eliminan con el recorte de caracteres finales de [Ajuste al límite de caracteres](https://github.com/Velvitty/img-dev/blob/main/README.es.md#ajuste-al-límite-de-caracteres). Huffman gasta al menos 1 bit por símbolo, incluso en un «cero» con probabilidad 0,95, donde la codificación aritmética gasta unos 0,074 bits. Las probabilidades son enteros de 11 bits que se actualizan en cada bit como `p ← p + (2048 − p)/16` con 0 y `p ← p − p/16` con 1: una media móvil exponencial con una memoria efectiva de unos 16 bits, que se adapta rápido incluso en un flujo de pocos cientos de bytes.
-- **Enfoque de ingeniería:** El modelo se mantiene pequeño, con 216 contextos en total. Con pocos datos, demasiados contextos harían que el flujo terminara antes de que cada uno aprendiera algo. La cabecera pasa por el mismo codificador con probabilidad 0,5 y cuesta exactamente 1 bit por bit, sin código aparte para empaquetar bits.
-- **Por qué así (alternativas):** SHIFT 4 (1/16) superó en 0,04 dB al valor por defecto de LZMA, 5 (1/32), en las fotos de validación. Unas probabilidades iniciales entrenadas con las fotos de prueba solo ganaron 0,03–0,07 dB, demasiado poco para el coste de incluir una tabla en el código.
-- **Valor:** La misma información se escribe mucho más corta que con códigos de longitud fija, así que un código de 400 caracteres puede contener cientos de coeficientes.
-- **Limitaciones:** El signo sigue costando casi un bit entero. No se usan vecinos bidimensionales (el coeficiente de arriba) como contexto, ni modelos más potentes como la mezcla de contextos. Un bit dañado estropea todo lo que viene después.
-- **Fuentes:** [8], [9], [10], [11], [12], [13]
+La mayoría de los coeficientes cuantizados son cero, y la probabilidad de que lo sean varía mucho según su frecuencia y sus vecinos. Solo cuando esa variación se refleja en las probabilidades se acerca la longitud a la entropía. Por eso los enteros no se escriben directamente, sino con un codificador aritmético binario que usa probabilidades según el contexto.
+
+Un suceso de probabilidad p cuesta `−log2 p` bits, y la codificación aritmética deja el total solo unos bytes por encima de esa suma [8]. Huffman gasta al menos un bit por símbolo, incluso en un «cero» con probabilidad 0,95, donde la codificación aritmética gasta unos 0,074 bits. Los bytes sobrantes del final se eliminan con el recorte de caracteres finales descrito en [Ajuste al límite de caracteres](https://github.com/Velvitty/img-dev/blob/main/README.es.md#ajuste-al-límite-de-caracteres).
+
+Cada coeficiente se divide en decisiones binarias en este orden: cero o no, signo, mayor que 1, mayor que 2 y Exp-Golomb, la misma binarización que CABAC en H.264 [11][12][13]. Cada decisión se codifica con la probabilidad de un contexto definido por el canal, la banda de frecuencia y si los dos coeficientes anteriores eran cero. El codificador sigue el range coder del SDK de LZMA, con un rango de 32 bits y acarreo mediante un byte de caché [9][10].
+
+Las probabilidades son enteros de 11 bits que se actualizan en cada bit como `p ← p + (2048 − p)/16` con 0 y `p ← p − p/16` con 1. Esta media móvil exponencial tiene una memoria efectiva de unos 16 bits, así que se adapta rápido incluso en un flujo de unos cientos de bytes; en las fotos de validación, 1/16 superó en 0,04 dB al 1/32 por defecto de LZMA. El modelo se mantiene pequeño, con 216 contextos, porque con pocos datos demasiados contextos harían terminar el flujo antes de que cada uno aprendiera algo. Unas probabilidades iniciales entrenadas con las fotos de prueba solo ganaron 0,03–0,07 dB, demasiado poco para justificar incluir una tabla en el código. La cabecera pasa por el mismo codificador con probabilidad 0,5 y cuesta exactamente un bit por bit, sin código aparte para empaquetar bits.
+
+Escrita así, la misma información ocupa muchos menos bits que con códigos de longitud fija, de modo que un código de 400 caracteres contiene cientos de coeficientes. Quedan puntos débiles: el signo sigue costando casi un bit entero, no se usan vecinos bidimensionales como el coeficiente de arriba, no se usan modelos más potentes como la mezcla de contextos, y un daño a mitad del flujo estropea todo lo que viene después.
 
 #### Notas de diseño: formato del flujo de bits
 
-- **Qué:** La cabecera con versión, cuadrícula, proporción, paso de cuantización, color medio y número de coeficientes, seguida de los coeficientes.
-- **Por qué:** El decodificador debe reconstruir la misma cuadrícula, el mismo orden de coeficientes y los mismos pasos solo a partir del código.
-- **Cómo (método y técnica):** La versión 0 tiene una cabecera fija de 62 bits. La versión 1 añade un índice de cuadrícula de 3 bits tras el bit de versión, usa 8 bits por valor DC y `⌈log2(W·H)⌉` bits por número de coeficientes.
-- **Enfoque matemático:** 62 bits son el 1,2 % de un presupuesto de 400 caracteres (unos 5200 bits). Guardar el número de coeficientes en la cabecera cuesta 10–16 bits fijos por canal, en lugar de preguntar en cada coeficiente si es el final del bloque.
-- **Enfoque de ingeniería:** La cuadrícula de 64 píxeles se sigue escribiendo como versión 0, así que tras ampliar el formato, los códigos existentes y los de 400 caracteres no han cambiado ni un bit (comprobado con 16 códigos de las fotos de prueba). El índice de cuadrícula 7 queda libre como marca para la próxima ampliación del formato.
-- **Por qué así (alternativas):** Un campo de versión de varios bits desde el principio habría sido más limpio, pero con 400 caracteres cada bit cuenta, así que empezó con 1 bit y las ampliaciones usan valores libres dentro de la versión 1.
-- **Valor:** La sobrecarga es mínima con presupuestos pequeños y queda margen para ampliar el formato.
-- **Limitaciones:** No hay suma de comprobación, así que un código cortado o alterado no se detecta con seguridad y puede decodificarse en una imagen equivocada.
-- **Fuentes:** [11]
+El decodificador debe reconstruir la misma cuadrícula, el mismo orden de coeficientes y los mismos pasos solo a partir del código. Por eso el código empieza con una cabecera que guarda la versión, la cuadrícula, la proporción, el paso de compresión, el color medio y el número de coeficientes, seguida de los coeficientes.
+
+La cabecera de la versión 0 ocupa 62 bits, el 1,2 % de un presupuesto de 400 caracteres de unos 5200 bits. Guardar el número de coeficientes en la cabecera en lugar de un marcador de fin de bloque cuesta 10–16 bits fijos por canal, sin preguntar en cada coeficiente si el bloque termina ahí [11]. La versión 1 añade un índice de cuadrícula de 3 bits tras el bit de versión, usa 8 bits por valor DC y `⌈log2(W·H)⌉` bits por número de coeficientes.
+
+La compatibilidad hacia atrás fue la principal preocupación al ampliar el formato. La cuadrícula de 64 píxeles se sigue escribiendo como versión 0, así que los códigos ya en circulación y los de 400 caracteres no cambiaron ni un bit (comprobado con 16 códigos de las fotos de prueba). Un campo de versión de varios bits desde el principio habría sido más limpio, pero con 400 caracteres cada bit cuenta, así que empezó con un bit. Como ya se usan los dos valores, la próxima ampliación usará como marca el índice de cuadrícula 7, libre en la versión 1. El punto débil que queda es la falta de una suma de comprobación: un código cortado o alterado no se detecta con seguridad y puede decodificarse en una imagen equivocada.
 
 #### Notas de diseño: conversión a texto
 
-- **Qué:** Escribir los bytes como sílabas hangul (13 bits) o caracteres base64url (6 bits).
-- **Por qué:** Los comentarios se limitan por número de caracteres, así que cada carácter debe llevar el máximo de bits posible.
-- **Cómo (método y técnica):** La cadena de bits se corta en grupos de 13 bits escritos como `U+AC00 + valor`, o en grupos de 6 bits escritos con el alfabeto base64url [25]. Al leer, se ignoran los caracteres fuera de esos rangos.
-- **Enfoque matemático:** Unicode tiene 11 172 sílabas hangul en `U+AC00–U+D7A3` [29]. Usarlas todas daría `log2 11172 ≈ 13,447` bits, un 3,4 % más que 13, pero exigiría tratar todo el código como un número grande y cambiarlo de base, un cálculo `O(n²)`. Con una potencia de dos, 8192 caracteres, basta con cortar y unir bits.
-- **Enfoque de ingeniería:** Los bits sobrantes del último carácter se rellenan con ceros, lo que encaja con la regla del decodificador de leer como cero los bytes que faltan y hace posible el recorte de caracteres finales.
-- **Por qué así (alternativas):** base83 (BlurHash [33]) o base85 llevan algo más de 6 bits, pero incluyen caracteres especiales de las direcciones como `#`, `%` y `?`. Los emojis o los caracteres han podrían llevar más bits, pero su visualización y escritura son poco fiables. El hangul es natural en DCInside y está en casi todas las fuentes.
-- **Valor:** Los mismos 400 caracteres guardan unas 2,2 veces más información que en ASCII.
-- **Limitaciones:** Donde la longitud se cuenta en bytes UTF-8, el hangul lleva 4,33 bits por byte, peor que los 6 del ASCII. Una normalización que descomponga las sílabas en jamo (NFD) [29] rompe el código; el decodificador no convierte ahora el texto pegado de vuelta a NFC.
-- **Fuentes:** [25], [29], [33]
+Los comentarios se limitan por número de caracteres, así que cada carácter debe llevar el máximo de bits posible. Los bytes se unen en una cadena de bits y se cortan en grupos de 13 bits escritos como la sílaba hangul `U+AC00 + valor`, o en grupos de 6 bits escritos como caracteres base64url [25]. Al leer se ignoran los caracteres fuera de esos rangos.
+
+Unicode tiene 11 172 sílabas hangul en `U+AC00–U+D7A3` [29]. Usarlas todas permitiría llevar `log2 11172 ≈ 13,447` bits, un 3,4 % más que 13. Sin embargo, eso exigiría tratar todo el código como un número grande y cambiarlo de base, un cálculo `O(n²)`, mientras que con una potencia de dos, 8192 caracteres, basta con cortar y unir bits. Los bits sobrantes del último carácter se rellenan con ceros, lo que encaja con la regla del decodificador de leer como cero los bytes que faltan y hace posible el recorte de caracteres finales.
+
+Se consideraron otros alfabetos. base83 (BlurHash [33]) o base85 llevan algo más de 6 bits, pero incluyen caracteres especiales de las direcciones como `#`, `%` y `?`. Los emojis o los caracteres han podrían llevar más bits, pero su visualización y escritura son poco fiables. El hangul es natural en los comentarios de DCInside, está en casi todas las fuentes y guarda unas 2,2 veces más información que el ASCII en los mismos 400 caracteres.
+
+Ahora bien, donde la longitud se cuenta en bytes UTF-8, el hangul lleva 4,33 bits por byte, peor que los 6 del ASCII. Además, una normalización que descomponga las sílabas en jamo (NFD) [29] rompe el código, y el decodificador no convierte ahora el texto pegado de vuelta a NFC.
 
 #### Notas de diseño: control de tasa y elección de cuadrícula
 
-- **Qué:** Cómo se eligen el q más fino y el tamaño de cuadrícula más adecuado dentro del límite de caracteres.
-- **Por qué:** Solo se fija un número de caracteres, y la calidad debe ser la mejor posible dentro de él.
-- **Cómo (método y técnica):** Se hace una búsqueda binaria de q entre 0 y 127 (7–8 codificaciones). Se quitan caracteres finales de uno en uno mientras el código se siga decodificando igual. Si la cuadrícula de 64 píxeles no llena el presupuesto ni con q = 0, la foto se vuelve a codificar en la siguiente cuadrícula, y los dos resultados se comparan por error cuadrático medio frente al original al tamaño de la cuadrícula mayor; se queda el mejor.
-- **Enfoque matemático:** La longitud del código R(q) decrece casi monótonamente con q, así que la búsqueda binaria encuentra el menor q con `R(q) ≤ presupuesto` en unos `⌈log2 128⌉ = 7` pasos. Decidir si una tasa dada se gasta en más resolución con cuantización más gruesa o en menos resolución con cuantización más fina es un problema clásico de optimización tasa-distorsión [20]. Aquí se resuelve con una regla voraz, probar una cuadrícula mayor solo cuando la menor está saturada, más una comparación real del error.
-- **Enfoque de ingeniería:** Una cuadrícula que cabe con q = 0 se salta la búsqueda binaria, lo que bajó una codificación de 7000 caracteres de unos 1,8 s a 1,4 s. El recorte de caracteres finales elimina los bytes sobrantes que el range coder emite al final, y como lo comprueba decodificando de verdad, no puede fallar.
-- **Por qué así (alternativas):** Codificar todas las cuadrículas y compararlas podría dar mejores resultados, pero las grandes tardan segundos cada una. Se probó una cuadrícula de 768 píxeles y se descartó porque 20 000 caracteres tardaban 16 segundos.
-- **Valor:** Con 400 caracteres sigue siendo igual de rápido, y con 7000 usa 6968 caracteres y llega a 28,0 dB.
-- **Limitaciones:** R(q) no es estrictamente monótona, así que pueden sobrar algunos caracteres. La regla voraz no garantiza la cuadrícula óptima. El cálculo se ejecuta en el hilo principal, así que la página se detiene un momento con presupuestos grandes (sin Web Worker).
-- **Fuentes:** [8], [20]
+Solo se fija un límite de caracteres, y dentro de él la calidad debe ser la mejor posible. Para ello se eligen a la vez el paso de compresión q y el tamaño de la cuadrícula.
+
+La longitud del código R(q) decrece casi monótonamente con q, así que una búsqueda binaria entre 0 y 127 encuentra el menor q con `R(q) ≤ presupuesto` en unas `⌈log2 128⌉ = 7` codificaciones. Después se quitan caracteres finales de uno en uno mientras el resultado decodificado siga igual. Así desaparecen los bytes sobrantes que el range coder emite al final, y como se comprueba decodificando de verdad, no puede fallar.
+
+Decidir si una tasa dada se gasta mejor en resolución o en precisión de cuantización es un problema clásico de optimización tasa-distorsión [20]. Aquí se resuelve con una regla voraz. La foto se codifica primero en la cuadrícula de 64 píxeles. Si incluso con q = 0 sobran caracteres, esa cuadrícula no puede llenar el presupuesto, así que la foto se vuelve a codificar en el siguiente tamaño. Los dos resultados se comparan por error cuadrático medio frente al original al tamaño de la cuadrícula mayor y se queda el mejor; la búsqueda se detiene cuando la cuadrícula mayor es peor o ya no llega a q = 0 [8]. Una cuadrícula que cabe con q = 0 se salta la búsqueda binaria, lo que bajó una codificación de 7000 caracteres de unos 1,8 s a 1,4 s.
+
+Codificar todas las cuadrículas y compararlas podría dar mejores resultados, pero las grandes tardan segundos cada una; se probó una de 768 píxeles y se descartó porque 20 000 caracteres tardaban 16 segundos. El resultado es que con 400 caracteres sigue siendo igual de rápido, y con 7000 usa 6968 caracteres y llega a 28,0 dB. R(q) no es estrictamente monótona, así que pueden sobrar algunos caracteres; la regla voraz no garantiza la cuadrícula óptima; y el cálculo se ejecuta en el hilo principal, de modo que la página se detiene un momento con presupuestos grandes.
 
 #### Notas de diseño: decodificación y ampliación
 
-- **Qué:** Calcular directamente desde los coeficientes la imagen al tamaño de la pantalla.
-- **Por qué:** Construir una imagen del tamaño de la cuadrícula y estirarla añade escalones de píxeles o el desenfoque de la interpolación.
-- **Cómo (método y técnica):** Las coordenadas de pantalla, pasadas a unidades de cuadrícula, se sustituyen en x e y de la transformada inversa y la serie de cosenos se evalúa directamente. Primero se calculan las filas, y se saltan las filas cuyos coeficientes son todos cero.
-- **Enfoque matemático:** La fórmula de la DCT inversa es una función suave definida también para x no enteros, así que muestrearla a cualquier resolución es una interpolación de banda limitada en la base de cosenos. El coste es `O(H·W·outW + filas·outH·outW)`.
-- **Enfoque de ingeniería:** La misma función dibuja las vistas previas de las tarjetas (480 px en el lado largo) y la pestaña Ver (960 px). Termina con una conversión YCbCr → RGB recortada a 0–255.
-- **Por qué así (alternativas):** Una DCT inversa al tamaño de la cuadrícula seguida del escalado de imagen del canvas sería más rápida, pero en cuadrículas pequeñas deja los patrones en cruz borrosos típicos de la interpolación bilineal.
-- **Valor:** Con muy poca información se obtiene un resultado agradable, difuminado con suavidad.
-- **Limitaciones:** Las ondulaciones de Gibbs [19] siguen viéndose al ampliar. `Math.cos` es, según la especificación, una aproximación de la implementación [31], así que los valores de píxel pueden diferir en ±1 entre navegadores.
-- **Fuentes:** [19], [31]
+Construir una imagen del tamaño de la cuadrícula y estirarla añadiría escalones de píxeles o el desenfoque de la interpolación, así que el decodificador calcula directamente desde los coeficientes la imagen al tamaño de la pantalla. Las coordenadas de pantalla, pasadas a unidades de cuadrícula, se sustituyen en x e y de la transformada inversa y la serie de cosenos se suma tal cual. La DCT inversa es una función suave definida también para x no enteros, así que muestrearla a cualquier resolución equivale a una interpolación de banda limitada en la base de cosenos.
+
+Primero se calculan las filas, y se saltan las filas cuyos coeficientes son todos cero, con un coste de `O(H·W·outW + filas·outH·outW)`. La misma función dibuja las vistas previas de las tarjetas (480 px en el lado largo) y la pestaña Ver (960 px), y termina con una conversión de YCbCr a RGB recortada a 0–255. Una DCT inversa al tamaño de la cuadrícula seguida del escalado del canvas sería más rápida, pero en cuadrículas pequeñas deja los patrones en cruz borrosos típicos de la interpolación bilineal.
+
+Este enfoque convierte muy poca información en una imagen agradable, difuminada con suavidad. Las ondulaciones de Gibbs [19] siguen viéndose al ampliar, y como `Math.cos` es, según la especificación, una aproximación de la implementación [31], los valores de píxel pueden diferir en ±1 entre navegadores.
 
 #### Notas de diseño: diseño de la página
 
-- **Qué:** Las pantallas, la detección del código, la restricción de dirección y los ajustes recordados dentro de un único archivo HTML.
-- **Por qué:** El principio de diseño es un solo archivo HTML con JS y CSS incluidos que se ejecute solo en el navegador, y quien lo recibe debe poder abrirlo sin preparar nada.
-- **Cómo (método y técnica):** El código del códec se inserta en la página al compilar. En el texto pegado, se toma como código el tramo más largo de hangul (al menos 4 caracteres); si no lo hay, el tramo base64url más largo después del último `?` o `#`. Fuera de g.yeon.at, localhost, archivos locales y la vista previa de claude.ai, la página solo dibuja un aviso y se detiene.
-- **Enfoque de ingeniería:** Todos los accesos a localStorage están protegidos para que la página funcione con los valores por defecto si el almacenamiento está bloqueado. Si se rechaza la API del portapapeles, copiar recurre a seleccionar el texto. El canvas y las imágenes siguen el comportamiento del estándar HTML (una imagen animada dibuja su fotograma por defecto) [30].
-- **Por qué así (alternativas):** Un framework acortaría el código de la interfaz, pero agrandaría el archivo y añadiría dependencias externas. Una restricción de dirección solo es fiable en un servidor, pero el alojamiento estático no tiene código de servidor.
-- **Valor:** Publicar es copiar un archivo, y la página funciona sin conexión (salvo las fuentes).
-- **Limitaciones:** La detección del código es heurística, así que una frase en hangul más larga que el código puede confundirse con él. La restricción de dirección es solo disuasoria y no detiene a quien modifique el código fuente.
-- **Fuentes:** [27], [30]
+La página sigue el principio de un solo archivo HTML con todo el JS y el CSS dentro, ejecutado solo en el navegador. Quien la recibe debe poder abrirla sin preparar nada, y publicar debería consistir en copiar un archivo. El código del códec se inserta en la página al compilar y, salvo las fuentes, la página funciona sin conexión. Un framework acortaría el código de la interfaz, pero agrandaría el archivo y añadiría dependencias externas.
+
+Para encontrar el código en un texto pegado, se elige el tramo más largo de al menos cuatro caracteres hangul o, si no lo hay, el tramo base64url más largo después del último `?` o `#` [27]. El código se lee aunque haya otras palabras alrededor, pero una frase en hangul más larga que el código puede elegirse por error.
+
+Todos los accesos a localStorage están protegidos para que la página vuelva a los valores por defecto si el almacenamiento está bloqueado, y si se rechaza la API del portapapeles, copiar recurre a seleccionar el texto. El canvas y las imágenes siguen el estándar HTML, según el cual una imagen animada dibuja su fotograma por defecto [30].
+
+La restricción de dirección hace que la página solo dibuje un aviso y se detenga cuando se abre fuera de g.yeon.at, localhost, archivos locales y la vista previa de claude.ai. Una restricción fiable corresponde a un servidor, pero el alojamiento estático no tiene código de servidor, así que esta comprobación queda como disuasión y no detiene a quien modifique el código fuente.
 
 #### Notas de diseño: compilación
 
-- **Qué:** El script que combina el códec y la página de `src/` en el archivo publicable y la vista previa.
-- **Por qué:** Las pruebas en Node.js y el navegador deben usar el mismo archivo del códec para que lo probado sea lo publicado.
-- **Cómo (método y técnica):** Quita solo la línea `module.exports` de `src/codec.js` e inserta el resto en `/*CODEC*/`.
-- **Enfoque de ingeniería:** Los resultados de la compilación (`dist/`, `build/`) también se guardan en el repositorio, para usar el archivo publicable donde no haya herramientas de compilación.
-- **Por qué así (alternativas):** Los empaquetadores como webpack son pesados para esta escala y añaden código de ejecución al resultado.
-- **Valor:** La compilación se reproduce con 30 líneas de Python sin dependencias.
-- **Limitaciones:** Como los resultados se guardan en el repositorio, cada cambio debe compilarse y guardarse junto con ellos para que código y resultado no se desfasen.
+Las pruebas en Node.js y el navegador deben usar el mismo archivo del códec para que el código probado sea el publicado. Por eso `build.py` quita solo la línea `module.exports` de `src/codec.js` e inserta el resto en el marcador `/*CODEC*/` de la página, de modo que la compilación se reproduce con 30 líneas de Python sin dependencias. Los empaquetadores como webpack son pesados para esta escala y añaden código de ejecución al resultado. Los resultados de la compilación (`dist/`, `build/`) también se guardan en el repositorio para poder usarlos donde no hay herramientas de compilación, lo que a su vez obliga a compilar y guardar juntos cada cambio para que código y resultado nunca se desfasen.
 
 #### Notas de diseño: método de evaluación
 
-- **Qué:** Cómo se compara numéricamente la calidad (PSNR), más las fotos de prueba y las pruebas en navegador.
-- **Por qué:** Para elegir parámetros y comprobar que un cambio no rompió resultados anteriores hacen falta números reproducibles.
-- **Cómo (método y técnica):** Se compara el original reducido con filtro de caja a 160×120 con el resultado decodificado dibujado a 160×120. Las pruebas de cuadrículas grandes comparan a 512×512. Las fotos de prueba son 8 de entrenamiento y 6 de validación de picsum.photos (fotos de Unsplash) [35].
-- **Enfoque matemático:** Las frecuencias altas del original no pueden transmitirse de todos modos, así que comparar cerca del tamaño que ve quien lo recibe es lo que revela las diferencias entre códecs. El PSNR es un logaritmo del error cuadrático medio, sencillo de calcular y fácil de reproducir.
-- **Enfoque de ingeniería:** Tras cada cambio del códec, se comprueba que los resultados con 400 caracteres (PSNR medio y cadenas de código) coinciden con los anteriores, para mantener la compatibilidad. Las pruebas en navegador abren la página real con Playwright y comprueban la creación de códigos, la apertura de enlaces, el pegado y la restricción de dirección.
-- **Por qué así (alternativas):** Las métricas perceptivas como SSIM se ajustan mejor al juicio humano [21], pero se empezó con PSNR por ser simple y fácil de interpretar.
-- **Valor:** En segundos se sabe si un cambio mejoró la calidad o rompió códigos existentes.
-- **Limitaciones:** Catorce fotos son una muestra pequeña, y el PSNR puede no coincidir con la calidad percibida [21][22]. La imagen de 1200×1200 usada en las pruebas de límites grandes no está en el repositorio.
-- **Fuentes:** [21], [22], [35]
+Elegir parámetros y comprobar que un cambio no rompió resultados anteriores exige números reproducibles. Este proyecto compara por PSNR el original reducido con filtro de caja a 160×120 con el resultado decodificado dibujado a 160×120; las pruebas de cuadrículas grandes comparan a 512×512. Las frecuencias altas del original no pueden transmitirse de todos modos, así que solo una comparación cerca del tamaño que ve quien lo recibe revela las diferencias entre códecs. El PSNR, un logaritmo del error cuadrático medio, es sencillo de calcular y fácil de reproducir.
+
+Las fotos de prueba son 8 de entrenamiento y 6 de validación de picsum.photos (fotos de Unsplash) [35]. Tras cada cambio del códec se comprobó que los resultados con 400 caracteres, tanto el PSNR medio como las cadenas de código, coincidían con los anteriores, para mantener la compatibilidad. Las pruebas en navegador abren la página real con Playwright y comprueban la creación de códigos, la apertura de enlaces, el pegado y la restricción de dirección.
+
+Las métricas perceptivas como SSIM se ajustan mejor al juicio humano [21], pero se eligió el PSNR como punto de partida simple y fácil de interpretar. Catorce fotos son una muestra pequeña, y el PSNR puede no coincidir con la calidad percibida [21][22]. La imagen de 1200×1200 usada en las pruebas de límites grandes no está en el repositorio.
 
 #### Notas de diseño: las matemáticas del PSNR
 
-- **Qué:** La definición del PSNR y el recuento de casos del ejemplo de 4 píxeles.
-- **Por qué:** Para responder con exactitud a preguntas como «¿cuántos dB si es idéntica?» y dar una escala para leer las cifras de este documento.
-- **Cómo (método y técnica):** Todos los valores de canal de la imagen de 4 píxeles (rojo, amarillo, azul, verde) son 0 o 255, así que si los de la otra imagen recorren 0–255, la diferencia d de cada canal es uniforme en 0–255. La distribución de la suma de errores al cuadrado es la convolución de 12 veces la distribución de d².
-- **Enfoque matemático:** `PSNR = 10·log10(255² / MSE)`, así que un MSE 10 veces mayor baja el PSNR exactamente 10 dB, y MSE = 0 da infinito por definición. Un solo canal con 1 de diferencia da `MSE = 1/12` y `PSNR = 10·log10(12 · 255²) ≈ 58,9 dB`. En el recuento, la convolución por FFT [24] tiene un error relativo de unos 10⁻¹⁶, que borró las probabilidades de la cola por debajo de 10⁻²⁰, y `np.histogram` obtiene los valores de cada intervalo como diferencias de una suma acumulada, lo que provoca cancelación al restar números diminutos de valores cercanos a 1 [23]. Pasar a una convolución directa, que solo suma términos positivos, y a `np.bincount` recuperó la cola exacta hasta 58,9 dB.
-- **Enfoque de ingeniería:** La tabla de impresiones para cada valor de PSNR es una guía empírica de este proyecto, no un estándar de la literatura.
-- **Valor:** El significado de las cifras se transmite sin malentendidos, y se corrigió la barra falsa causada por el error numérico.
-- **Limitaciones:** El PSNR puede no coincidir con la calidad que percibe la gente [21][22].
-- **Fuentes:** [21], [22], [23], [24]
+El PSNR se define como
+
+```math
+\mathrm{PSNR} = 10 \log_{10} \frac{255^2}{\mathrm{MSE}}
+```
+
+así que un MSE 10 veces mayor baja el PSNR exactamente 10 dB, y MSE = 0 da infinito por definición. En la imagen de 4 píxeles (rojo, amarillo, azul, verde), un solo canal con 1 de diferencia da `MSE = 1/12` y por tanto `PSNR = 10·log10(12 · 255²) ≈ 58,9 dB`.
+
+La gráfica de recuento de casos parte de una observación. Todos los valores de canal de la imagen de 4 píxeles son 0 o 255, así que si los de la otra imagen recorren 0–255, la diferencia d de cada canal es uniforme en 0–255, y la distribución de la suma de errores al cuadrado es la convolución de 12 veces la distribución de d². La primera versión usó convolución por FFT [24], cuyo error relativo de unos 10⁻¹⁶ borró las probabilidades de la cola por debajo de 10⁻²⁰. Además, `np.histogram` obtiene los valores de cada intervalo como diferencias de una suma acumulada, lo que provoca cancelación al restar números diminutos de valores cercanos a 1 [23]. Solo al pasar a una convolución directa, que suma únicamente términos positivos, y a `np.bincount` se obtuvo con exactitud la cola hasta 58,9 dB.
+
+La tabla de impresiones para cada valor de PSNR es una guía empírica de este proyecto, no un estándar de la literatura. El PSNR puede no coincidir con la calidad que percibe la gente [21][22].
 
 ### Referencias
 
