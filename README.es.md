@@ -10,7 +10,7 @@ Una página web que convierte una foto en un texto que cabe en una sola línea d
 
 <sub>De izquierda a derecha: original, 400, 1000, 4000 y 7000 caracteres (código hangul, dirección incluida). Foto: Thomas Lefebvre / Unsplash</sub>
 
-Se creó para compartir fotos en sitios con comentarios cortos donde no se pueden publicar imágenes, como DCInside. La foto se comprime en el navegador hasta unos cientos de bytes y se convierte en una línea como `https://g.yeon.at/?뗈앏괟…`; quien la recibe abre el enlace y ve la foto.
+Se creó para compartir fotos en sitios con comentarios cortos donde no se pueden publicar imágenes, como DCInside. La foto se comprime en el navegador hasta unos cientos de bytes y se convierte en una línea como `https://g.yeon.at/?TqVTweO…`; quien la recibe abre el enlace y ve la foto.
 
 - Sin servidor, sin subidas, sin almacenamiento. El código es la propia foto.
 - Cada sílaba hangul lleva 13 bits, unas 2,2 veces más información que el ASCII con el mismo número de caracteres.
@@ -56,7 +56,7 @@ Bajo cada tarjeta aparecen el tamaño original, la longitud del código, la long
 
 | Ajuste | Valor por defecto | Descripción |
 |---|---|---|
-| Letras del código | Hangul | El hangul lleva 13 bits por carácter; el ASCII, 6. El ASCII es para sitios donde no se puede usar hangul. |
+| Letras del código | ASCII | El ASCII lleva 6 bits por carácter; el hangul, 13. Los comentarios de DCInside solo convierten en enlace las direcciones en ASCII, así que el ASCII es el valor por defecto; el hangul sirve para enviar solo el código y que quien lo reciba lo pegue en la pestaña Ver. |
 | Límite de caracteres | 400 | Botones para un comentario de DCInside (400), un tuit (280) y 1000; también se puede escribir cualquier valor. |
 | Dirección delante | `https://g.yeon.at/?` | Texto que va antes del código. Si se deja vacío, se genera solo el código. |
 
@@ -74,13 +74,13 @@ Una herramienta para sitios que muestran los enlaces `data:` como imágenes (los
 
 | Formato | Ejemplo | Caracteres para el código | Capacidad |
 |---|---|---|---|
-| Hangul + dirección (por defecto) | `https://g.yeon.at/?뗈앏괟…` | 381 | unos 619 bytes |
-| ASCII + dirección | `https://g.yeon.at/?TqVTweO…` | 381 | unos 285 bytes |
+| ASCII + dirección (por defecto) | `https://g.yeon.at/?TqVTweO…` | 381 | unos 285 bytes |
+| Hangul + dirección | `https://g.yeon.at/?뗈앏괟…` | 381 | unos 619 bytes |
 | Solo código hangul | `뗈앏괟…` | 400 | 650 bytes |
 | Solo código ASCII | `TqVTweO…` | 400 | 300 bytes |
 
-- La dirección debe empezar por `https://` para convertirse en un enlace pulsable en los comentarios.
-- Cuando el código es tan largo que la dirección pasaría de unos 7 KB (códigos hangul de unos 770 caracteres o más), se usa `#` en lugar de `?`. `https://g.yeon.at/#código` abre la misma foto.
+- La dirección debe empezar por `https://` para convertirse en un enlace pulsable en los comentarios. Los comentarios de DCInside solo enlazan direcciones escritas en ASCII, así que una dirección con un código hangul no se puede pulsar.
+- Cuando el código es tan largo que la dirección pasaría de unos 7 KB (códigos ASCII de unos 6980 caracteres o hangul de unos 770 o más), se usa `#` en lugar de `?`. `https://g.yeon.at/#código` abre la misma foto, pero los comentarios de DCInside dejan fuera del enlace lo que va después de `#`.
 - `https://g.yeon.at/index.html?código` también funciona, pero usa 10 caracteres más.
 
 ## Calidad
@@ -144,14 +144,14 @@ El PSNR mide cuánto se parece un resultado al original; cuanto más alto, más 
 - Los límites de 7000 caracteres o más tardan unos segundos en comprimirse, y la página se detiene mientras tanto.
 - Las fotos más alargadas que unos 3,8:1 se aplastan a esa proporción, las zonas transparentes quedan en blanco y de los GIF animados solo se guarda el primer fotograma.
 - Donde la longitud se cuenta en bytes UTF-8, los códigos hangul salen perdiendo; ahí conviene el código ASCII.
-- Todavía no se ha comprobado si DCInside incluye en el enlace automático el hangul que va después de `?`.
+- En los comentarios de DCInside, los códigos hangul y lo que va después de `#` no entran en el enlace. Un código hangul ocupa menos de la mitad, pero quien lo recibe tiene que copiarlo y pegarlo en la pestaña Ver.
 
 ## Solución de problemas
 
 | Síntoma | Solución |
 |---|---|
 | «이 글자로는 사진을 만들 수 없습니다» (no se puede crear una foto con este texto) | El código se cortó o se mezclaron otros caracteres. Copia de nuevo la línea entera. |
-| El enlace abre la pestaña Crear sin foto | Puede que el enlace automático del comentario se cortara. Copia el código del comentario y pégalo en la pestaña Ver. Quien envía puede usar el código ASCII. |
+| El enlace abre la pestaña Crear sin foto | El enlace automático del comentario se cortó antes de `?` o `#`, algo que ocurre con los códigos hangul y los enlaces con `#`. Copia el código del comentario y pégalo en la pestaña Ver. Quien envía puede usar el código ASCII. |
 | El botón de copiar no hace nada | El texto ya está seleccionado; pulsa Ctrl/⌘+C. |
 | La foto no se parece en nada al original | El código puede venir de una versión con otro esquema de compresión. |
 | El total queda un poco por debajo del límite | Es normal. Los pasos de compresión van a saltos, así que pueden sobrar algunos caracteres. |
@@ -286,7 +286,7 @@ Unicode tiene 11 172 sílabas hangul en `U+AC00–U+D7A3` [27]. Usarlas todas pe
 
 Se consideraron otros alfabetos. base83 (BlurHash [5]) o base85 llevan algo más de 6 bits, pero incluyen caracteres especiales de las direcciones como `#`, `%` y `?`. Los emojis o los caracteres han podrían llevar más bits, pero su visualización y escritura son poco fiables. El hangul es natural en los comentarios de DCInside, está en casi todas las fuentes y guarda unas 2,2 veces más información que el ASCII en los mismos 400 caracteres.
 
-Ahora bien, donde la longitud se cuenta en bytes UTF-8, el hangul lleva 4,33 bits por byte, peor que los 6 del ASCII. Además, una normalización que descomponga las sílabas en jamo (NFD) [27] rompe el código, y el decodificador no convierte ahora el texto pegado de vuelta a NFC.
+Ahora bien, donde la longitud se cuenta en bytes UTF-8, el hangul lleva 4,33 bits por byte, peor que los 6 del ASCII. Además, una normalización que descomponga las sílabas en jamo (NFD) [27] rompe el código, y el decodificador no convierte ahora el texto pegado de vuelta a NFC. Y como el enlazado automático de los comentarios de DCInside solo abarca direcciones en ASCII, un código hangul solo puede transmitirse copiándolo y pegándolo, no como enlace. Por eso las letras del código por defecto de la página son ASCII.
 
 ### Control de tasa y elección de cuadrícula
 
@@ -308,11 +308,11 @@ Este enfoque convierte muy poca información en una imagen agradable, difuminada
 
 ### Direcciones y transporte
 
-El enlace por defecto tiene la forma `https://g.yeon.at/?código`. DCInside solo convierte en enlace pulsable el texto que empieza por `https://`, y el alojamiento estático ignora todo lo que va después de `?` y sirve el mismo `index.html`. Así, cada dirección puede abrir una foto distinta sin configurar el servidor. Al cargarse, la página lee `location.search`, o `location.hash` si la consulta está vacía, para obtener el código.
+El enlace por defecto tiene la forma `https://g.yeon.at/?código`. DCInside solo convierte en enlace pulsable las direcciones en ASCII que empiezan por `https://`, y el alojamiento estático ignora todo lo que va después de `?` y sirve el mismo `index.html`. Así, cada dirección puede abrir una foto distinta sin configurar el servidor. Al cargarse, la página lee `location.search`, o `location.hash` si la consulta está vacía, para obtener el código.
 
 En la sintaxis URI [30], la consulta tras `?` se envía al servidor, mientras que el fragmento tras `#` se queda en el navegador. Una sílaba hangul ocupa 3 bytes en UTF-8, y en una dirección cada byte se convierte en los tres caracteres `%XX`, así que una sílaba ocupa 9 bytes. Un código de 381 caracteres ocupa entonces 381 × 9 = 3429 bytes más los 19 de la dirección. Un servidor HTTP puede responder 414 a un destino demasiado largo [31], y las peticiones directas a g.yeon.at se aceptaron con 6000 bytes y se rechazaron con 414 con 9000. Para dejar margen al resto de la línea de petición, Copiar cambia `?` por `#` cuando la dirección codificada como URL pasa de 7000 bytes, lo que equivale a `(7000 − 19) / 9 ≈ 775` sílabas.
 
-Usar siempre `#` eliminaría cualquier preocupación por el 414, pero `?` es la forma por defecto y basta para los enlaces cortos. Por eso los enlaces de 400 caracteres mantienen la forma con `?`, mientras que los de miles de caracteres pasan a `#` y se abren sin errores; lo que va después de `#` tampoco llega a los registros del servidor. El límite del 414 es una medición del alojamiento actual y puede cambiar, y hasta dónde abarca caracteres no ASCII el enlazado automático de un foro o una mensajería depende del servicio.
+Usar siempre `#` eliminaría cualquier preocupación por el 414, pero `?` es la forma por defecto y basta para los enlaces cortos. Por eso los enlaces de 400 caracteres mantienen la forma con `?`, mientras que los de miles de caracteres pasan a `#` y se abren sin errores; lo que va después de `#` tampoco llega a los registros del servidor. El límite del 414 es una medición del alojamiento actual y puede cambiar, y como los comentarios de DCInside dejan fuera del enlace el hangul y lo que va después de `#`, allí los enlaces de miles de caracteres que pasan a `#` y los códigos hangul solo pueden transmitirse pegándolos.
 
 ### Diseño de la página
 
@@ -387,6 +387,6 @@ La tabla de impresiones de PSNR de [Calidad](#calidad) es una guía empírica de
 
 ### Mediciones
 
-- Límite de 400 caracteres en los comentarios de DCInside, imágenes y enlaces `data:` que no se muestran, y enlazado automático solo con `https://`: comprobado en un cuadro de comentarios real.
+- Límite de 400 caracteres en los comentarios de DCInside, imágenes y enlaces `data:` que no se muestran, enlazado automático solo con `https://`, y que los códigos ASCII tras `?` entran en el enlace mientras que los códigos hangul y lo que va después de `#` no: comprobado en un cuadro de comentarios real.
 - Límite del 414 en g.yeon.at: el 2026-10-26, peticiones con consultas de 1000 a 60 000 bytes devolvieron 200 con 6000 bytes y 414 con 9000.
 - Cifras de calidad y velocidad: medidas con Node.js 22.

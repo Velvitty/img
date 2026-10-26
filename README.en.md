@@ -10,7 +10,7 @@ A web page that turns a photo into text short enough for a single comment, and t
 
 <sub>From left: original, 400, 1,000, 4,000 and 7,000 characters (Hangul code, address included). Photo: Thomas Lefebvre / Unsplash</sub>
 
-It was built for sharing photos where comments are short and images cannot be posted, such as DCInside. The photo is compressed in the browser to a few hundred bytes and becomes a single line like `https://g.yeon.at/?뗈앏괟…`; the recipient opens the link to see the photo.
+It was built for sharing photos where comments are short and images cannot be posted, such as DCInside. The photo is compressed in the browser to a few hundred bytes and becomes a single line like `https://g.yeon.at/?TqVTweO…`; the recipient opens the link to see the photo.
 
 - No server, no upload, no storage. The code itself is the photo.
 - Each Hangul syllable carries 13 bits, about 2.2 times as much as ASCII in the same number of characters.
@@ -56,7 +56,7 @@ Under each card are the original size, the code length, the total length against
 
 | Setting | Default | Description |
 |---|---|---|
-| Code letters | Hangul | Hangul carries 13 bits per character, ASCII 6. ASCII is for places where Hangul cannot be used. |
+| Code letters | ASCII | ASCII carries 6 bits per character, Hangul 13. DCInside comments only turn ASCII addresses into links, so ASCII is the default; Hangul is for sending the code alone for the recipient to paste into the View tab. |
 | Character limit | 400 | Buttons for a DCInside comment (400), a tweet (280) and 1,000; any value can be typed in. |
 | Address prefix | `https://g.yeon.at/?` | Text placed before the code. Leave it empty to output the code alone. |
 
@@ -74,13 +74,13 @@ A tool for places that show `data:` links as images (sites that allow HTML or Ma
 
 | Format | Example | Characters for the code | Capacity |
 |---|---|---|---|
-| Hangul + address (default) | `https://g.yeon.at/?뗈앏괟…` | 381 | about 619 bytes |
-| ASCII + address | `https://g.yeon.at/?TqVTweO…` | 381 | about 285 bytes |
+| ASCII + address (default) | `https://g.yeon.at/?TqVTweO…` | 381 | about 285 bytes |
+| Hangul + address | `https://g.yeon.at/?뗈앏괟…` | 381 | about 619 bytes |
 | Hangul code only | `뗈앏괟…` | 400 | 650 bytes |
 | ASCII code only | `TqVTweO…` | 400 | 300 bytes |
 
-- The address must start with `https://` to become a clickable link in comments.
-- When the code is long enough that the address would pass about 7 KB (Hangul codes of roughly 770 characters or more), `#` is used instead of `?`. `https://g.yeon.at/#code` opens the same photo.
+- The address must start with `https://` to become a clickable link in comments. DCInside comments only link addresses written in ASCII, so an address with a Hangul code is not clickable.
+- When the code is long enough that the address would pass about 7 KB (ASCII codes of roughly 6,980 characters or Hangul codes of roughly 770 or more), `#` is used instead of `?`. `https://g.yeon.at/#code` opens the same photo, but DCInside comments leave the part after `#` out of the link.
 - `https://g.yeon.at/index.html?code` also works but uses 10 more characters.
 
 ## Quality
@@ -144,14 +144,14 @@ PSNR measures how close a result is to the original; higher is closer. The guide
 - Limits of 7,000 characters or more take a few seconds to compress, and the page pauses meanwhile.
 - Photos longer than about 3.8:1 are squeezed to that ratio, transparent areas become white, and animated GIFs keep only their first frame.
 - Where length is counted in UTF-8 bytes, Hangul codes are at a disadvantage; use the ASCII code there.
-- Whether DCInside autolinks the Hangul after `?` has not been verified yet.
+- In DCInside comments, Hangul codes and anything after `#` are not included in links. A Hangul code is less than half as long, but the recipient has to copy it and paste it into the View tab.
 
 ## Troubleshooting
 
 | Symptom | Fix |
 |---|---|
 | "이 글자로는 사진을 만들 수 없습니다" (cannot make a photo from this text) | The code was cut off or other characters got mixed in. Copy the whole line again. |
-| The link opens the Make tab with no photo | The comment's autolink may have been cut short. Copy the code from the comment and paste it into the View tab. Senders can use the ASCII code. |
+| The link opens the Make tab with no photo | The comment's autolink stopped before `?` or `#`, which happens with Hangul codes and `#` links. Copy the code from the comment and paste it into the View tab. Senders can use the ASCII code. |
 | The copy button does nothing | The text is already selected; press Ctrl/⌘+C. |
 | The photo looks nothing like the original | The code may come from a version with a different compression scheme. |
 | The total is a little under the limit | This is normal. Compression steps come in jumps, so a few characters can be left over. |
@@ -286,7 +286,7 @@ Unicode has 11,172 Hangul syllables at `U+AC00–U+D7A3` [27]. Using all of them
 
 Other alphabets were considered. base83 (BlurHash [5]) or base85 carry slightly more than 6 bits but include address-special characters such as `#`, `%` and `?`. Emoji or Han characters could carry more bits, but their display and input are unreliable. Hangul is natural in DCInside comments, present in most fonts, and holds about 2.2 times as much information as ASCII in the same 400 characters.
 
-Where length is counted in UTF-8 bytes, however, Hangul carries 4.33 bits per byte, worse than ASCII's 6. A normalization that decomposes syllables into jamo (NFD) [27] also breaks a code, and the decoder does not currently convert pasted text back to NFC.
+Where length is counted in UTF-8 bytes, however, Hangul carries 4.33 bits per byte, worse than ASCII's 6. A normalization that decomposes syllables into jamo (NFD) [27] also breaks a code, and the decoder does not currently convert pasted text back to NFC. And since DCInside comments only autolink addresses written in ASCII, a Hangul code can be passed on only by copying and pasting, not as a link. That is why the page's default code letters are ASCII.
 
 ### Rate control and grid selection
 
@@ -308,11 +308,11 @@ This approach turns very little information into a pleasant, smoothly blurred im
 
 ### Addresses and transport
 
-The default link has the form `https://g.yeon.at/?code`. DCInside only turns text starting with `https://` into a clickable link, and static hosting ignores everything after `?` and serves the same `index.html`. As a result every address can open a different photo with no server configuration. On load the page reads `location.search`, or `location.hash` when the query is empty, to get the code.
+The default link has the form `https://g.yeon.at/?code`. DCInside only turns ASCII addresses starting with `https://` into clickable links, and static hosting ignores everything after `?` and serves the same `index.html`. As a result every address can open a different photo with no server configuration. On load the page reads `location.search`, or `location.hash` when the query is empty, to get the code.
 
 In URI syntax [30] the query after `?` is sent to the server while the fragment after `#` stays in the browser. A Hangul syllable is 3 bytes in UTF-8, and each byte becomes the three characters `%XX` in an address, so one syllable takes 9 bytes. A 381-character code therefore takes 381 × 9 = 3,429 bytes plus the 19-byte address. An HTTP server may answer 414 to an overly long target [31], and direct requests to g.yeon.at were accepted at 6,000 bytes and rejected with 414 at 9,000. To leave room for the rest of the request line, Copy replaces `?` with `#` once the URL-encoded address passes 7,000 bytes, which corresponds to `(7000 − 19) / 9 ≈ 775` syllables.
 
-Using `#` all the time would remove any worry about 414, but `?` is the default form and is enough for short links. So 400-character links keep the `?` form, while links of thousands of characters switch to `#` and open without errors; the part after `#` never reaches server logs either. The 414 boundary is a measurement of today's hosting and may change, and how far an autolinker on a forum or messenger extends over non-ASCII characters differs by service.
+Using `#` all the time would remove any worry about 414, but `?` is the default form and is enough for short links. So 400-character links keep the `?` form, while links of thousands of characters switch to `#` and open without errors; the part after `#` never reaches server logs either. The 414 boundary is a measurement of today's hosting and may change, and since DCInside comments leave Hangul and anything after `#` out of links, links of thousands of characters that switched to `#` and Hangul codes can only be passed on there by pasting.
 
 ### Page design
 
@@ -387,6 +387,6 @@ The PSNR impression table in [Quality](#quality) is an empirical guide used in t
 
 ### Measurements
 
-- The 400-character limit of DCInside comments, the lack of display for images and `data:` links, and autolinking only with `https://`: checked in an actual comment box.
+- The 400-character limit of DCInside comments, the lack of display for images and `data:` links, autolinking only with `https://`, and ASCII codes after `?` being included in links while Hangul codes and anything after `#` are not: checked in an actual comment box.
 - The 414 boundary of g.yeon.at: on 2026-10-26, requests with queries of 1,000–60,000 bytes returned 200 at 6,000 bytes and 414 at 9,000 bytes.
 - Quality and speed figures: measured with Node.js 22.

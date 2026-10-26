@@ -185,8 +185,8 @@ a.btn { display: inline-block; text-decoration: none; }
       <div class="field">
         <span class="label">코드 글자</span>
         <div class="seg" role="group" aria-label="코드 글자">
-          <button type="button" data-fmt="hangul" aria-pressed="true">한글</button>
-          <button type="button" data-fmt="b64" aria-pressed="false">영문</button>
+          <button type="button" data-fmt="b64" aria-pressed="true">영문</button>
+          <button type="button" data-fmt="hangul" aria-pressed="false">한글</button>
         </div>
         <span class="hint" id="fmt-hint"></span>
       </div>
@@ -697,7 +697,8 @@ function showTab(name) {
 tabs.forEach((t) => ($("tab-" + t).onclick = () => showTab(t)));
 
 // ---------- 400자 코덱: 만들기 ----------
-const mk = { fmt: store.get("fmt") === "b64" ? "b64" : "hangul", limit: 400, base: store.get("linkPrefix") ?? defaultBase() };
+// Comment boxes such as DCInside only turn ASCII into links, so ASCII codes are the default.
+const mk = { fmt: store.get("fmt") === "hangul" ? "hangul" : "b64", limit: 400, base: store.get("linkPrefix") ?? defaultBase() };
 const items = [];
 let nextId = 1;
 
@@ -834,14 +835,15 @@ function rerunAll() {
 }
 
 const FMT_HINT = {
-  hangul: "한 글자에 13비트를 담아 가장 선명합니다.",
-  b64: "영문·숫자만 씁니다. 한글을 못 쓰는 곳용이며 한글보다 약 2배 흐립니다.",
+  hangul: "한 글자에 13비트를 담아 같은 글자 수에 영문의 약 2.2배를 싣습니다. 디시 댓글에서는 링크가 되지 않으므로 코드만 보내고 받는 쪽이 보기 탭에 붙여넣게 합니다.",
+  b64: "영문·숫자만 씁니다. 디시 댓글에서도 눌리는 링크가 됩니다.",
 };
 function syncSettings() {
   document.querySelectorAll("[data-fmt]").forEach((b) => b.setAttribute("aria-pressed", b.dataset.fmt === mk.fmt));
   $("fmt-hint").textContent = FMT_HINT[mk.fmt];
   $("base-hint").textContent = mk.base
-    ? `주소가 ${mk.base.length}자를 쓰고, 사진에 ${budget()}자가 남습니다. https://로 시작해야 댓글에서 눌리는 링크가 됩니다.`
+    ? `주소가 ${mk.base.length}자를 쓰고, 사진에 ${budget()}자가 남습니다. https://로 시작해야 댓글에서 눌리는 링크가 됩니다.` +
+      (mk.fmt === "hangul" ? " 디시 댓글에서는 한글 코드가 링크로 바뀌지 않으니, 링크로 보내려면 영문을 고르세요." : "")
     : "코드만 만듭니다. 받은 사람은 보기 탭에 붙여넣습니다.";
   document.querySelectorAll(".chip[data-len]:not(.jchip)").forEach((c) => c.setAttribute("aria-pressed", Number(c.dataset.len) === mk.limit));
 }
